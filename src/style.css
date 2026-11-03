@@ -12,7 +12,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 h1{font-size:var(--text-display);font-weight:500;line-height:1.12;letter-spacing:-1.4px}h2{font-size:var(--text-body);font-weight:600;line-height:1.4}
 strong{font-weight:600}main h1:focus{outline:none}.app{min-height:var(--app-height)}
 .site-header{height:72px;width:100%;max-width:1200px;margin:auto;padding:0 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:12px}
-.wordmark{display:flex;align-items:center;gap:9px;font-size:min(var(--text-title),28px);font-weight:600;letter-spacing:-1.2px;line-height:1;white-space:nowrap}
+.wordmark{display:flex;padding:0;min-height:44px;background:none;color:inherit;font-family:inherit;align-items:center;gap:9px;font-size:min(var(--text-title),28px);font-weight:600;letter-spacing:-1.2px;line-height:1;white-space:nowrap}
 .wordmark>svg{color:var(--accent)}.icon-button{display:grid;place-items:center;min-width:44px;width:44px;min-height:44px;height:44px;padding:0;background:transparent;border-radius:50%}
 .icon-button:hover{background:#20251f08}.primary-button,.outline-button{display:flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:13px 20px;border-radius:8px;font-size:var(--text-body);font-weight:500;line-height:1.4;white-space:normal}
 .primary-button{background:var(--accent);color:#fff}.primary-button:hover{background:#365244}.primary-button:not(:disabled):active{background:#1e3028}
