@@ -8,7 +8,7 @@ import '@fontsource/dm-sans/700.css';
 import '@fontsource/caveat/400.css';
 import '@fontsource/special-elite/400.css';
 import '@fontsource/permanent-marker/400.css';
-import { films, fontOptions, frames, doodles, readPhoto, loadImage, newPhoto, renderPhoto, renderSheet, sheetLayout, download, jpegPrint, canvasBlob, formats, formatChoices, paperChoices, paginate, MAX_PHOTOS, type PrintFormat, type LayoutMode, type Photo, type Paper } from './engine';
+import { films, fontOptions, frames, doodles, readPhoto, loadImage, newPhoto, renderPhoto, renderSheet, sheetLayout, download, jpegPrint, canvasBlob, formats, formatChoices, paperChoices, paginate, photoSize, photosPerPrint, printStyles, todayStamp, loadFonts, STAMP_CHARS, MAX_PHOTOS, type PrintFormat, type PrintStyle, type LayoutMode, type Photo, type Paper } from './engine';
 import './style.css';
 
 const Print = memo(function Print({ photo, format, pxPerMm: requestedScale, className = '' }: { photo: Photo; format: PrintFormat; pxPerMm?: number; className?: string }) {
@@ -16,7 +16,7 @@ const Print = memo(function Print({ photo, format, pxPerMm: requestedScale, clas
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
-    const task = requestAnimationFrame(() => { document.fonts.load(`16px "${photo.font}"`).then(() => document.fonts.ready).then(() => {
+    const task = requestAnimationFrame(() => { loadFonts([photo]).then(() => {
       if (cancelled || !canvas.current) return;
       // Bound interactive buffers independently of the 600 DPI export renderer.
       const image = renderPhoto(photo, pxPerMm, format);
@@ -25,7 +25,7 @@ const Print = memo(function Print({ photo, format, pxPerMm: requestedScale, clas
     }); });
     return () => { cancelled = true; cancelAnimationFrame(task); };
   }, [photo, format, pxPerMm]);
-  return <canvas ref={canvas} width={formats[format].width * pxPerMm} height={formats[format].height * pxPerMm} className={className} aria-label={`Instant photo${photo.caption ? `: ${photo.caption}` : ''}`} role="img"/>;
+  return <canvas ref={canvas} width={photoSize(format).width * pxPerMm} height={photoSize(format).height * pxPerMm} className={className} aria-label={`Instant photo${photo.caption ? `: ${photo.caption}` : ''}`} role="img"/>;
 });
 // Dev only: `?demo=4` opens the print page with 4 sample prints, for checking sheets.
 const demoCount = import.meta.env.DEV ? Math.min(MAX_PHOTOS, Math.max(0, Math.floor(Number(new URLSearchParams(location.search).get('demo'))) || 0)) : 0;
@@ -61,13 +61,19 @@ function Range({ label, value, onChange, min = 0, max = 100, step = 1, unit = '%
   return <label className="range-control" style={{ '--range-fill': `${(value - min) / (max - min) * 100}%` } as React.CSSProperties}><span>{label}<output>{value.toFixed(step < 1 ? 2 : 0)}{unit}</output></span><input aria-label={label} aria-valuetext={`${value.toFixed(step < 1 ? 2 : 0)}${unit === '×' ? ' times' : unit}`} type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(+e.target.value)}/></label>;
 }
 function FormatPicker({ value, onChange, visual = false }: { value: PrintFormat; onChange: (format: PrintFormat) => void; visual?: boolean }) {
-  if (visual) return <fieldset className="format-choices"><legend>Print size</legend><div>{formatChoices.map(f => <button key={f} type="button" aria-pressed={value === f} onClick={() => onChange(f)}><span className="format-silhouette" style={{ aspectRatio: `${formats[f].width}/${formats[f].height}` }}><i style={{ aspectRatio: `${formats[f].imageWidth}/${formats[f].imageHeight}` }}/></span><strong>{formats[f].name}</strong><small>{formats[f].width} × {formats[f].height} mm</small>{value === f && <Check className="format-check" size={13}/>}</button>)}</div></fieldset>;
+  if (visual) return <fieldset className="format-choices"><legend>Print size</legend><div>{formatChoices.map(f => <button key={f} type="button" aria-pressed={value === f} onClick={() => onChange(f)}><span className="format-silhouette" style={{ aspectRatio: `${formats[f].width}/${formats[f].height}` }}><i style={{ aspectRatio: `${formats[f].imageWidth}/${formats[f].imageHeight}` }}/></span><strong>{formats[f].name}</strong><small>{photosPerPrint(f) > 1 ? `${photosPerPrint(f)} photos · ` : ''}{formats[f].width} × {formats[f].height} mm</small>{value === f && <Check className="format-check" size={13}/>}</button>)}</div></fieldset>;
   return <div className="format-picker"><label className="field-label" htmlFor="print-format">Finished print size</label><select id="print-format" value={value} onChange={e => onChange(e.target.value as PrintFormat)}>{formatChoices.map(f => <option key={f} value={f}>{formats[f].name} · {formats[f].width} × {formats[f].height} mm</option>)}</select></div>;
 }
 function capacityFor(paper: Paper, format: PrintFormat, mode: LayoutMode, labeled = false) {
   try { return sheetLayout(paper, format, mode, labeled).capacity; } catch { return 0; }
 }
 const steps = ['Crop', 'Look', 'Caption'];
+const styleFields: Record<PrintStyle, { caption: string; captionHint: string; note: string; noteHint: string }> = {
+  classic: { caption: 'Caption', captionHint: 'The good old days…', note: 'Date or place', noteHint: 'Berlin, November 2026' },
+  player: { caption: 'Song', captionHint: 'Our song', note: 'Artist', noteHint: 'Who sings it' },
+  ticket: { caption: 'Event', captionHint: 'Our first movie night', note: 'Date and seat', noteHint: '03.11.26 · Row F · Seat 12' },
+  boarding: { caption: 'Route', captionHint: 'CGN → BCN', note: 'Date, gate and seat', noteHint: '03 NOV · GATE B12 · SEAT 14A' },
+};
 function App() {
   const pageScroll = useRef<Record<string, number>>({ welcome: 0, tray: 0, print: 0 });
   const returnPhoto = useRef('');
@@ -94,9 +100,11 @@ function App() {
     catch (e) { return { plan: null, error: (e as Error).message }; }
   }, [paper, format, layoutMode]);
   const capacity = layoutResult.plan?.capacity ?? 0;
-  const pages = useMemo(() => paginate(tray, capacity), [tray, capacity]);
+  // Strips take four photos each, in tray order, so pages fill strip by strip.
+  const perPrint = photosPerPrint(format), printCount = Math.ceil(tray.length / perPrint);
+  const pages = useMemo(() => perPrint > 1 && capacity ? Array.from({ length: Math.ceil(tray.length / (capacity * perPrint)) }, (_, i) => tray.slice(i * capacity * perPrint, (i + 1) * capacity * perPrint)) : paginate(tray, capacity), [tray, capacity, perPrint]);
   const currentPage = Math.min(pageIndex, Math.max(0, pages.length - 1));
-  const currentLayout = useMemo(() => capacity ? sheetLayout(paper, format, layoutMode, false, pages[currentPage]?.length ?? 0) : null, [capacity, paper, format, layoutMode, pages, currentPage]);
+  const currentLayout = useMemo(() => capacity ? sheetLayout(paper, format, layoutMode, false, Math.ceil((pages[currentPage]?.length ?? 0) / perPrint)) : null, [capacity, paper, format, layoutMode, pages, currentPage]);
   const paperKey = `${paper.width}x${paper.height}`, price = prices[paperKey] ?? '';
   const priceError = price.trim() && (!/^(?:\d+(?:[.,]\d{1,2})?|[.,]\d{1,2})$/.test(price.trim()) || Number(price.replace(',', '.')) > 999) ? 'Enter €0 to €999 with up to two decimal places.' : '';
   const totalCost = price.trim() && !priceError ? pages.length * Number(price.replace(',', '.')) : null;
@@ -211,9 +219,9 @@ function App() {
   function startCropDrag(event: React.PointerEvent<HTMLDivElement>) {
     if (!photo || step !== 0 || compare || loading || cropDrag.current || !event.isPrimary || event.button !== 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const pixelScale = Math.min(rect.width / spec.width, rect.height / spec.height);
-    const left = rect.left + (rect.width - spec.width * pixelScale) / 2 + (spec.width - spec.imageWidth) / 2 * pixelScale;
-    const top = rect.top + (rect.height - spec.height * pixelScale) / 2 + 4 * pixelScale;
+    const view = photoSize(format), pixelScale = Math.min(rect.width / view.width, rect.height / view.height);
+    const left = rect.left + (rect.width - view.width * pixelScale) / 2 + (spec.width - spec.imageWidth) / 2 * pixelScale;
+    const top = rect.top + (rect.height - view.height * pixelScale) / 2 + 4 * pixelScale;
     if (event.clientX < left || event.clientX > left + spec.imageWidth * pixelScale || event.clientY < top || event.clientY > top + spec.imageHeight * pixelScale) return;
     const rotated = photo.rotation % 180 !== 0;
     const width = rotated ? photo.image.naturalHeight : photo.image.naturalWidth, height = rotated ? photo.image.naturalWidth : photo.image.naturalHeight;
@@ -314,7 +322,7 @@ function App() {
       if (kind === 'jpg') {
         setExportStatus(`Preparing JPG sheet ${currentPage + 1} of ${pages.length}…`);
         const c = await renderSheet(pages[currentPage], paper, guides, undefined, { format, mode: layoutMode });
-        download(await jpegPrint(c), `${name}-${pages[currentPage].length}prints${pages.length > 1 ? `-sheet${currentPage + 1}-of${pages.length}` : ''}.jpg`);
+        download(await jpegPrint(c), `${name}-${Math.ceil(pages[currentPage].length / perPrint)}prints${pages.length > 1 ? `-sheet${currentPage + 1}-of${pages.length}` : ''}.jpg`);
         c.width = 1; c.height = 1;
       } else {
         const { jsPDF } = await import('jspdf');
@@ -330,7 +338,7 @@ function App() {
           c.width = 1; c.height = 1;
         }
         pdf.setProperties({ title: 'Afterglow · true-size instant prints', subject: `Print at 100% / Actual size. ${spec.name} frames: ${spec.width} × ${spec.height} mm.` });
-        download(pdf.output('blob'), `${name}-${tray.length}prints-${pages.length}sheets.pdf`);
+        download(pdf.output('blob'), `${name}-${printCount}prints-${pages.length}sheets.pdf`);
       }
       setExportStatus(`${kind.toUpperCase()} ready: ${kind === 'jpg' ? `sheet ${currentPage + 1} of ${pages.length}` : `${pages.length} ${pages.length === 1 ? 'sheet' : 'sheets'}`}. Check your downloads.`);
     } catch (e) { setError((e as Error).message); setExportStatus(''); }
@@ -346,6 +354,7 @@ function App() {
             requestAnimationFrame(() => captionRef.current?.setSelectionRange(start + d.symbol.length, start + d.symbol.length));
           }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d.path}/></svg></button>); }
   const undoNotice = removed && <div className="undo-notice" role="status"><div><strong>Photo removed</strong><p>One space is reserved so you can restore it.</p></div><div><button className="outline-button" onClick={undoRemoval}>Undo</button><button className="text-button" onClick={keepRemoved}>Keep removed</button></div></div>;
+  const fields = styleFields[format === 'strip' ? 'classic' : photo?.style ?? 'classic'];
   const displayed = photo && compare ? { ...photo, film: 'original' as const, grain: 0, leak: false, exposure: 0, softening: 0, flash: 0 } : photo;
   return <div className={`app ${screen === 'edit' ? 'editing' : ''}`}>
     <header className="site-header">
@@ -375,11 +384,14 @@ function App() {
           </section>}
           {step === 2 && <section>
             <h2 className="caption-heading">Add a caption <span>optional</span></h2>
-            <div className="field-heading"><label htmlFor="caption">Caption</label><span id="caption-count">{photo.caption.length}/45 characters</span></div>
-            <input id="caption" ref={captionRef} className="caption-input" aria-describedby={captionError ? 'caption-count caption-help' : 'caption-count'} placeholder="The good old days…" enterKeyHint="done" autoComplete="off" value={photo.caption} maxLength={45} onChange={e => update({ caption: e.target.value })}/>{captionError && <p id="caption-help" className="inline-error" role="alert">Caption is full. Select text to replace it, or shorten it to add a doodle.</p>}
-            <div className="doodle-picker" role="group" aria-label="Hand-drawn caption symbols"><span className="doodle-label">Add a hand-drawn doodle</span><div>{doodles.slice(0, 4).map(renderDoodle)}</div><details className="more-doodles"><summary>More doodles (4)</summary><div>{doodles.slice(4).map(renderDoodle)}</div></details></div>
+            {format === 'strip' ? <p className="look-note">On a strip, the first photo’s caption prints at the bottom.</p> : <div className="font-options print-styles" role="group" aria-label="Print style">{printStyles.map(st => <button key={st.id} className={(photo.style ?? 'classic') === st.id ? 'active' : ''} aria-pressed={(photo.style ?? 'classic') === st.id} onClick={() => update({ style: st.id })}>{st.name}</button>)}</div>}
+            <div className="field-heading"><label htmlFor="caption">{fields.caption}</label><span id="caption-count">{photo.caption.length}/45 characters</span></div>
+            <input id="caption" ref={captionRef} className="caption-input" aria-describedby={captionError ? 'caption-count caption-help' : 'caption-count'} placeholder={fields.captionHint} enterKeyHint="done" autoComplete="off" value={photo.caption} maxLength={45} onChange={e => update({ caption: e.target.value })}/>{captionError && <p id="caption-help" className="inline-error" role="alert">Caption is full. Select text to replace it, or shorten it to add a doodle.</p>}
+            {fields === styleFields.classic && <div className="doodle-picker" role="group" aria-label="Hand-drawn caption symbols"><span className="doodle-label">Add a hand-drawn doodle</span><div>{doodles.slice(0, 4).map(renderDoodle)}</div><details className="more-doodles"><summary>More doodles (4)</summary><div>{doodles.slice(4).map(renderDoodle)}</div></details></div>}
             <details className="caption-style"><summary>Caption style<span>{fontOptions.find(f => f.value === photo.font)?.name} · {frames.find(f => f.value === photo.frame)?.name} frame</span></summary><div className="font-options" role="group" aria-label="Caption font">{fontOptions.map(f => <button key={f.value} style={{ fontFamily: f.value }} className={photo.font === f.value ? 'active' : ''} aria-pressed={photo.font === f.value} onClick={() => update({ font: f.value })}>{f.name}</button>)}</div><div className="frame-row"><span>Frame color</span><div>{frames.map(f => <button key={f.value} className={`frame-swatch ${photo.frame === f.value ? 'active' : ''}`} style={{ background: f.value }} aria-label={`${f.name} frame`} aria-pressed={photo.frame === f.value} onClick={() => update({ frame: f.value })}>{photo.frame === f.value && <Check size={16} color={f.value === '#302b38' ? '#fff' : '#302b38'}/>}</button>)}</div></div></details>
-            <label className="field-label note-label" htmlFor="note">Date or place <span>optional</span></label><input id="note" enterKeyHint="done" autoComplete="off" placeholder="Berlin, November 2026" value={photo.note} maxLength={50} onChange={e => update({ note: e.target.value })}/>
+            <label className="field-label note-label" htmlFor="note">{fields.note} <span>optional</span></label><input id="note" enterKeyHint="done" autoComplete="off" placeholder={fields.noteHint} value={photo.note} maxLength={50} onChange={e => update({ note: e.target.value })}/>
+            <label className="check-row stamp-row"><span>Orange date stamp</span><input type="checkbox" checked={!!photo.stamp} onChange={e => update({ stamp: e.target.checked ? todayStamp() : '' })}/></label>
+            {!!photo.stamp && <><label className="field-label" htmlFor="stamp">Stamp date <span>digits, spaces, ’ . : -</span></label><input id="stamp" className="stamp-input" enterKeyHint="done" autoComplete="off" inputMode="numeric" value={photo.stamp} maxLength={10} onChange={e => update({ stamp: e.target.value.replace(/[‘’]/g, "'").replace(STAMP_CHARS, '') || ' ' })}/></>}
           </section>}
         </div>
       </div>
@@ -391,7 +403,7 @@ function App() {
       <div className="tray-grid">{Array.from({ length: Math.min(MAX_PHOTOS, Math.max(2, tray.length + (tray.length % 2))) }, (_, i) => {
         const p = tray[i];
         return <div key={p?.id ?? i} className="tray-item" data-photo-id={p?.id}>
-          <div className={`tray-slot ${p ? '' : 'empty'}`} style={{ aspectRatio: `${spec.width}/${spec.height}` }}>
+          <div className={`tray-slot ${p ? '' : 'empty'}`} style={{ aspectRatio: `${photoSize(format).width}/${photoSize(format).height}` }}>
             {p ? <button className="tray-photo" aria-label={`Edit photo ${i + 1}`} onClick={() => { returnPhoto.current = p.id; setPhoto({ ...p }); setStep(0); setAdvanced(false); setCreativeOpen(!['original', 'instax', 'instax-rich'].includes(p.film)); navigate('edit'); }}><Print photo={p} format={format} pxPerMm={8}/></button>
             : <button className="empty-slot" disabled={loading || !slotsAvailable} aria-label="Add another photo" onClick={() => choosePhotos('add')}><Plus size={24}/><span>{slotsAvailable ? 'Add photo' : 'Space held for Undo'}</span></button>}
           </div>
@@ -403,18 +415,18 @@ function App() {
     </main>}
     {screen === 'print' && <main className="print-page">
       <button className="text-button" onClick={() => navigate('tray')}><ArrowLeft size={16}/>Back to tray</button>
-      <div className="page-heading"><h1 tabIndex={-1}>{paperError ? 'Check paper size' : `${pages.length} ${pages.length === 1 ? 'sheet' : 'sheets'} ready to print`}</h1><p>{tray.length} {spec.name} {tray.length === 1 ? 'print' : 'prints'} · {pages.length} {pages.length === 1 ? 'sheet' : 'sheets'}</p></div>
+      <div className="page-heading"><h1 tabIndex={-1}>{paperError ? 'Check paper size' : `${pages.length} ${pages.length === 1 ? 'sheet' : 'sheets'} ready to print`}</h1><p>{printCount} {spec.name} {printCount === 1 ? 'print' : 'prints'} · {pages.length} {pages.length === 1 ? 'sheet' : 'sheets'}</p></div>
       <div className="print-layout"><div>
-        <div className="paper-preview" style={{ aspectRatio: paperError ? '3/4' : `${paper.width}/${paper.height}` }}>{paperError ? <div className="paper-placeholder"><Info size={24}/><p>{paperError}</p></div> : <canvas ref={sheetRef} role="img" aria-label={`Sheet ${currentPage + 1} of ${pages.length}, with ${pages[currentPage]?.length ?? 0} ${spec.name} prints`}/>}</div>
+        <div className="paper-preview" style={{ aspectRatio: paperError ? '3/4' : `${paper.width}/${paper.height}` }}>{paperError ? <div className="paper-placeholder"><Info size={24}/><p>{paperError}</p></div> : <canvas ref={sheetRef} role="img" aria-label={`Sheet ${currentPage + 1} of ${pages.length}, with ${Math.ceil((pages[currentPage]?.length ?? 0) / perPrint)} ${spec.name} prints`}/>}</div>
         {pages.length > 1 && <div className="sheet-pager"><button className="icon-button" aria-label="Previous print sheet" disabled={currentPage === 0} onClick={() => setPageIndex(currentPage - 1)}><ArrowLeft size={18}/></button><span>Sheet {currentPage + 1} of {pages.length}</span><button className="icon-button" aria-label="Next print sheet" disabled={currentPage === pages.length - 1} onClick={() => setPageIndex(currentPage + 1)}><ArrowRight size={18}/></button></div>}
-        {!paperError && <><p className="sheet-caption">{pages[currentPage]?.length ?? 0} of {tray.length} {tray.length === 1 ? 'print' : 'prints'} on this sheet</p><p className="quiet-note cut-summary">{currentLayout?.lines.length ?? 0} cut lines on this sheet.<br/>Follow the small numbers on the sheet: cut 1 first, then 2, and so on.</p></>}
+        {!paperError && <><p className="sheet-caption">{Math.ceil((pages[currentPage]?.length ?? 0) / perPrint)} of {printCount} {printCount === 1 ? 'print' : 'prints'} on this sheet</p>{perPrint > 1 && tray.length % perPrint > 0 && <p className="quiet-note">Each strip holds {perPrint} photos. Add {perPrint - tray.length % perPrint} more to fill the last strip.</p>}<p className="quiet-note cut-summary">{currentLayout?.lines.length ?? 0} cut lines on this sheet.<br/>Follow the small numbers on the sheet: cut 1 first, then 2, and so on.</p></>}
       </div><section className="print-settings">
         <FormatPicker value={format} onChange={f => { setFormat(f); setPageIndex(0); }}/>
         <label className="field-label" htmlFor="layout-mode">Arrange for</label><select id="layout-mode" value={layoutMode} onChange={e => { setLayoutMode(e.target.value as LayoutMode); setPageIndex(0); }}><option value="easy">Fewer cuts · up to {capacityFor(paper, format, 'easy')} per sheet</option><option value="dense">Fit more · up to {capacityFor(paper, format, 'dense')} per sheet</option></select>
         <label className="field-label spaced-label" htmlFor="paper">Paper size</label><select id="paper" value={paperChoices.some(p => p.width === paper.width && p.height === paper.height) ? paperKey : 'custom'} onChange={e => { const selected = paperChoices.find(p => `${p.width}x${p.height}` === e.target.value); if (selected) { setPaper(selected); setPageIndex(0); } }}>{paperChoices.map(p => <option key={`${p.width}x${p.height}`} value={`${p.width}x${p.height}`}>{p.width / 10} × {p.height / 10} cm · up to {capacityFor(p, format, layoutMode)} prints</option>)}<option value="custom" disabled>Custom measurements</option></select>
         <label className="check-row"><span>Dashed cutting guides</span><input type="checkbox" checked={guides} onChange={e => setGuides(e.target.checked)}/></label>
         <details><summary>Printing cost<span>{totalCost !== null ? `€${totalCost.toFixed(2)} total` : 'Optional'}</span></summary><label className="field-label" htmlFor="sheet-price">Price per {paper.width / 10} × {paper.height / 10} cm sheet (€)</label><input id="sheet-price" type="text" inputMode="decimal" aria-invalid={!!priceError} aria-describedby={priceError ? 'price-error' : undefined} placeholder="For example, 0,49" value={price} onChange={e => setPrices(old => ({ ...old, [paperKey]: e.target.value }))}/>{priceError && <p id="price-error" className="inline-error" role="alert">{priceError}</p>}<p>Each paper size keeps its own price. Counts include partially filled sheets.</p></details>
-        {totalCost !== null && pages.length > 0 && tray.length > 0 && <p className="cost-summary">€{totalCost.toFixed(2)} total · €{(totalCost / tray.length).toFixed(2)} per print</p>}
+        {totalCost !== null && pages.length > 0 && tray.length > 0 && <p className="cost-summary">€{totalCost.toFixed(2)} total · €{(totalCost / printCount).toFixed(2)} per print</p>}
         <details><summary>Paper measurements<span>{paper.width} × {paper.height} mm</span></summary><p>Use the printer’s actual paper size.</p><div className="paper-measurements"><label>Width (mm)<input type="number" inputMode="decimal" step="any" min="5" max="400" value={paper.width || ''} onChange={e => setPaper(p => ({ ...p, width: +e.target.value }))}/></label><label>Height (mm)<input type="number" inputMode="decimal" step="any" min="5" max="500" value={paper.height || ''} onChange={e => setPaper(p => ({ ...p, height: +e.target.value }))}/></label></div></details>
         {paperError && <p className="inline-error" role="alert">{paperError}</p>}
         <button className="primary-button" disabled={!!paperError || !pages.length} onClick={() => { setExportStatus(''); setDialog('export'); }}><ArrowDownToLine size={18}/>Download {pages.length > 1 ? 'print sheets' : 'print sheet'}</button>
@@ -425,7 +437,7 @@ function App() {
     {notice && <div className="feedback-toast" role="status"><Check size={16}/><span>{notice}</span></div>}
     {error && <div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={18}/></button></div>}
     {dialog === 'cancel' && <Modal title={queuedPhotos.length ? 'Leave these photos?' : 'Leave this photo?'} onClose={() => setDialog(null)}><p>{queuedPhotos.length ? `This photo and ${queuedPhotos.length} waiting ${queuedPhotos.length === 1 ? 'photo' : 'photos'} will be discarded. Already saved photos stay in your tray.` : `Photo and caption changes won’t be saved. Your tray keeps its ${spec.name} print size.`}</p><button className="primary-button" onClick={() => setDialog(null)}>Keep editing</button><button className="text-button discard-button" onClick={discard}>Discard changes</button></Modal>}
-    {dialog === 'export' && <Modal title="Download print sheets" busy={exporting} onClose={() => { if (!exporting) setDialog(null); }}><p>{tray.length} {spec.name} {tray.length === 1 ? 'print' : 'prints'} across {pages.length} {pages.length === 1 ? 'sheet' : 'sheets'} of {paper.width} × {paper.height} mm paper.</p>{error && <p className="inline-error" role="alert">{error}</p>}<button className="export-option export-primary" disabled={exporting} onClick={() => exportFile('jpg')}><span><strong>{exporting ? 'Preparing…' : pages.length > 1 ? `Download sheet ${currentPage + 1} JPG` : 'Download JPG'}</strong><small>For photo kiosks, including dm · 600 DPI{pages.length > 1 ? ' · current sheet only' : ''}</small></span><ArrowDownToLine size={20}/></button><button className="export-option" disabled={exporting} onClick={() => exportFile('pdf')}><span><strong>{pages.length > 1 ? 'Download all sheets PDF' : 'Download PDF'}</strong><small>Lossless · print at 100% / Actual size</small></span><ArrowDownToLine size={20}/></button><p className="export-status" role="status">{exporting && <LoaderCircle size={16} className="busy-spinner"/>}{exportStatus}</p><p className="quiet-note">Choose glossy paper in the matching size. Turn off cropping and automatic enhancement where available.</p>{!exporting && exportStatus.endsWith('Check your downloads.') && <button className="text-button discard-button" onClick={startOver}>Done · start new prints</button>}</Modal>}
+    {dialog === 'export' && <Modal title="Download print sheets" busy={exporting} onClose={() => { if (!exporting) setDialog(null); }}><p>{printCount} {spec.name} {printCount === 1 ? 'print' : 'prints'} across {pages.length} {pages.length === 1 ? 'sheet' : 'sheets'} of {paper.width} × {paper.height} mm paper.</p>{error && <p className="inline-error" role="alert">{error}</p>}<button className="export-option export-primary" disabled={exporting} onClick={() => exportFile('jpg')}><span><strong>{exporting ? 'Preparing…' : pages.length > 1 ? `Download sheet ${currentPage + 1} JPG` : 'Download JPG'}</strong><small>For photo kiosks, including dm · 600 DPI{pages.length > 1 ? ' · current sheet only' : ''}</small></span><ArrowDownToLine size={20}/></button><button className="export-option" disabled={exporting} onClick={() => exportFile('pdf')}><span><strong>{pages.length > 1 ? 'Download all sheets PDF' : 'Download PDF'}</strong><small>Lossless · print at 100% / Actual size</small></span><ArrowDownToLine size={20}/></button><p className="export-status" role="status">{exporting && <LoaderCircle size={16} className="busy-spinner"/>}{exportStatus}</p><p className="quiet-note">Choose glossy paper in the matching size. Turn off cropping and automatic enhancement where available.</p>{!exporting && exportStatus.endsWith('Check your downloads.') && <button className="text-button discard-button" onClick={startOver}>Done · start new prints</button>}</Modal>}
     {dialog === 'home' && <Modal title="Start over?" onClose={() => setDialog(null)}><p>{tray.length} {tray.length === 1 ? 'photo' : 'photos'} in your tray will be cleared. Download your print sheets first if you still need them.</p><button className="primary-button" onClick={() => setDialog(null)}>Keep my photos</button><button className="text-button discard-button" onClick={startOver}>Clear tray and start over</button></Modal>}
     {dialog === 'guide' && <Modal title="Printing help" onClose={() => setDialog(null)}><p>You’re making <strong>{spec.name} prints: {spec.width} × {spec.height} mm</strong>, with a {spec.imageWidth} × {spec.imageHeight} mm photo inside. One print size applies to the whole tray.</p><div className="size-comparison">{formatChoices.map(f => <span key={f}><strong>{formats[f].name}</strong>{formats[f].width} × {formats[f].height} mm</span>)}</div><p><strong>Fewer cuts</strong> uses a tight grid with shared borders. <strong>Fit more</strong> can rotate prints and split them into groups to use more of the paper. The photo size stays exact.</p><p>Each guide runs to the edge of the paper and has a small number. Cut in number order: the long cuts come first and turn the sheet into strips, the rest separate the prints. A paper trimmer is fastest; a craft knife against a metal ruler also works. Scissors are hardest to keep straight.</p><p>At dm, download the JPG for each sheet and choose matching glossy paper. Turn off cropping, extra borders and automatic enhancement where available. For home printing, the PDF includes all sheets: choose <strong>100% / Actual size</strong>, with “Fit to page” off.</p><p>These are instant-style prints on photo paper. The looks are interpretations, not calibrated film matches. Photos and optional prices stay in this tab; download before closing or reloading.</p></Modal>}
 
