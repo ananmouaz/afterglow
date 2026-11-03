@@ -6,12 +6,23 @@ export const formats = {
   mini: { name: 'Mini', width: 54, height: 86, imageWidth: 46, imageHeight: 62 },
   square: { name: 'Square', width: 72, height: 86, imageWidth: 62, imageHeight: 62 },
   wide: { name: 'Wide', width: 108, height: 86, imageWidth: 99, imageHeight: 62 },
+  // Peel-apart instant: the image keeps the ragged, chemical-streaked edge of a pulled print.
+  peel: { name: 'Peel-apart', width: 83, height: 108, imageWidth: 73, imageHeight: 95 },
+  // Photo-booth strip: four photos per print. Two fit side by side on 10 × 15 cm paper.
+  strip: { name: 'Strip', width: 48, height: 146, imageWidth: 42, imageHeight: 30, photos: 4 },
 } as const;
+// Formats with a caption band that can take the ticket, boarding-pass and player styles.
+export const supportsStyles = (format: PrintFormat) => format !== 'strip' && format !== 'peel';
+export const photosPerPrint = (format: PrintFormat) => 'photos' in formats[format] ? (formats[format] as { photos: number }).photos : 1;
+// What one photo looks like on its own: a whole print, or one strip cell.
+export const photoSize = (format: PrintFormat) => format === 'strip' ? { width: 48, height: 38 } : formats[format];
 export type PrintFormat = keyof typeof formats;
 export const formatChoices = Object.keys(formats) as PrintFormat[];
 export type LayoutMode = 'easy' | 'dense';
 export const paperChoices = [{ width: 90, height: 130 }, { width: 100, height: 150 }, { width: 110, height: 170 }, { width: 130, height: 180 }, { width: 150, height: 200 }, { width: 200, height: 300 }];
-export type Photo = { id: string; src: string; image: HTMLImageElement; caption: string; note: string; font: string; frame: string; film: Film; strength: number; exposure: number; softening: number; flash: number; grain: number; leak: boolean; zoom: number; panX: number; panY: number; rotation: number; sample: boolean };
+export type PrintStyle = 'classic' | 'player' | 'ticket' | 'boarding';
+export const printStyles: { id: PrintStyle; name: string }[] = [{ id: 'classic', name: 'Classic' }, { id: 'player', name: 'Now playing' }, { id: 'ticket', name: 'Ticket' }, { id: 'boarding', name: 'Boarding pass' }];
+export type Photo = { id: string; src: string; image: HTMLImageElement; caption: string; note: string; style: PrintStyle; stamp: string; font: string; frame: string; film: Film; strength: number; exposure: number; softening: number; flash: number; grain: number; leak: boolean; zoom: number; panX: number; panY: number; rotation: number; sample: boolean };
 export const films: { id: Film; name: string; description: string; color: string }[] = [
   { id: 'original', name: 'Original', description: 'Your colors, untouched', color: '#a9c4b5' },
   { id: 'instax', name: 'Instant Natural', description: 'Instax-inspired: subdued color and gentle contrast. An interpretation, not a calibrated match.', color: '#98bfae' },
@@ -57,7 +68,7 @@ function drawCaption(ctx: CanvasRenderingContext2D, p: Photo, pxPerMm: number, w
   ctx.restore();
 }
 export function newPhoto(image: HTMLImageElement, src: string, sample = false): Photo {
-  return { id: crypto.randomUUID(), src, image, caption: sample ? 'Somewhere, nowhere.' : '', note: sample ? 'a little longer here' : '', font: 'Caveat', frame: '#ffffff', film: 'original', strength: 85, exposure: 0, softening: 0, flash: 0, grain: 0, leak: false, zoom: 1, panX: 0, panY: 0, rotation: 0, sample };
+  return { id: crypto.randomUUID(), src, image, caption: sample ? 'Somewhere, nowhere.' : '', note: sample ? 'a little longer here' : '', style: 'classic', stamp: '', font: 'Caveat', frame: '#ffffff', film: 'original', strength: 85, exposure: 0, softening: 0, flash: 0, grain: 0, leak: false, zoom: 1, panX: 0, panY: 0, rotation: 0, sample };
 }
 export function loadImage(src: string): Promise<HTMLImageElement> { return new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('This image could not be opened. Try a JPG, PNG or WebP.')); img.src = src; }); }
 export async function readPhoto(file: File): Promise<Photo> {
@@ -169,18 +180,173 @@ function photographicImage(p: Photo, pxPerMm: number, format: PrintFormat) {
   if (cacheable) previewCache.set(p.image, { key, canvas: image });
   return image;
 }
+export function todayStamp(date = new Date()) {
+  return `'${String(date.getFullYear()).slice(2)} ${String(date.getMonth() + 1).padStart(2, '0')} ${String(date.getDate()).padStart(2, '0')}`;
+}
+// Seven-segment digits in the orange of 90s film-camera date backs.
+const SEGMENTS: Record<string, string> = { 0: 'abcdef', 1: 'bc', 2: 'abged', 3: 'abgcd', 4: 'fgbc', 5: 'afgcd', 6: 'afgedc', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg', '-': 'g' };
+export const STAMP_CHARS = /[^0-9' .:-]/g;
+function drawStamp(ctx: CanvasRenderingContext2D, text: string, right: number, bottom: number, pxPerMm: number, height = 2.4) {
+  const h = height * pxPerMm, w = h * .5, step = h * .78, chars = [...text.replace(STAMP_CHARS, '')];
+  if (!chars.length) return;
+  const narrow = (ch: string) => ch === "'" || ch === '.' || ch === ':' ? step * .45 : step;
+  const total = chars.reduce((sum, ch) => sum + narrow(ch), 0);
+  ctx.save(); ctx.translate(right * pxPerMm - total, bottom * pxPerMm); ctx.transform(1, 0, -.12, 1, 0, 0);
+  ctx.strokeStyle = ctx.fillStyle = '#ff8a1e'; ctx.lineWidth = h * .13; ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(255,110,20,.75)'; ctx.shadowBlur = h * .35;
+  const pts: Record<string, [number, number, number, number]> = { a: [0, -h, w, -h], b: [w, -h, w, -h / 2], c: [w, -h / 2, w, 0], d: [0, 0, w, 0], e: [0, -h / 2, 0, 0], f: [0, -h, 0, -h / 2], g: [0, -h / 2, w, -h / 2] };
+  let x = 0;
+  for (const ch of chars) {
+    ctx.beginPath();
+    if (ch === "'") { ctx.moveTo(x + w * .3, -h); ctx.lineTo(x + w * .2, -h * .72); }
+    else if (ch === '.') ctx.arc(x + w * .2, 0, ctx.lineWidth * .5, 0, Math.PI * 2);
+    else if (ch === ':') { ctx.arc(x + w * .2, -h * .72, ctx.lineWidth * .5, 0, Math.PI * 2); ctx.moveTo(x + w * .2, -h * .28); ctx.arc(x + w * .2, -h * .28, ctx.lineWidth * .5, 0, Math.PI * 2); }
+    else for (const seg of SEGMENTS[ch] ?? '') { const [x1, y1, x2, y2] = pts[seg], i = h * .07; ctx.moveTo(x + x1 + (x1 === x2 ? 0 : i), y1 + (y1 === y2 ? 0 : i)); ctx.lineTo(x + x2 - (x1 === x2 ? 0 : i), y2 - (y1 === y2 ? 0 : i)); }
+    ch === '.' || ch === ':' ? ctx.fill() : ctx.stroke(); x += narrow(ch);
+  }
+  ctx.restore();
+}
+// Small stable number from the photo id, so a ticket keeps its number across renders.
+function serial(id: string, digits = 4) { let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return String(h % 10 ** digits).padStart(digits, '0'); }
+function drawIcon(ctx: CanvasRenderingContext2D, path: string, cx: number, cy: number, size: number, fill = true) {
+  ctx.save(); ctx.translate(cx - size / 2, cy - size / 2); ctx.scale(size / 24, size / 24);
+  const shape = new Path2D(path); if (fill) ctx.fill(shape); else { ctx.lineWidth = 1.6; ctx.stroke(shape); } ctx.restore();
+}
+const ICONS = {
+  prev: 'M5 4h3v16H5zM20 4v16L9 12z', next: 'M16 4h3v16h-3zM4 4v16l11-8z', pause: 'M7 4h4v16H7zM13 4h4v16h-4z',
+  plane: 'M21 15.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0v5l-8 5v2l8-2.5V18l-2 1.5V21l3.5-1 3.5 1v-1.5L13 18v-5z',
+  heart: 'M12 21C9 17 2 13 3 7C4 2 10 3 12 8C15 1 22 4 21 9C20 14 16 18 12 21',
+};
+// The caption band runs from the photo's lower edge to the bottom of the frame.
+function drawStyledCaption(ctx: CanvasRenderingContext2D, p: Photo, pxPerMm: number, x0: number, width: number, top: number, ink: string) {
+  const mm = (v: number) => v * pxPerMm, x1 = x0 + width, cx = x0 + width / 2;
+  const text = (t: string, x: number, y: number, size: number, font: string, align: CanvasTextAlign = 'center', max = width, weight = '') => {
+    let s = size; ctx.font = `${weight} ${mm(s)}px "${font}"`;
+    while (ctx.measureText(t).width > mm(max) && s > 1.2) { s -= .1; ctx.font = `${weight} ${mm(s)}px "${font}"`; }
+    ctx.textAlign = align; ctx.fillText(t, mm(x), mm(y), mm(max));
+  };
+  const faint = (alpha: number, draw: () => void) => { ctx.save(); ctx.globalAlpha = alpha; draw(); ctx.restore(); };
+  ctx.textBaseline = 'middle'; ctx.fillStyle = ctx.strokeStyle = ink;
+  if (p.style === 'player') {
+    text(p.caption || 'Song title', x0, top + 4.4, 3, 'DM Sans', 'left', width - 6, '600');
+    faint(.6, () => text(p.note || 'Artist', x0, top + 7.9, 2.1, 'DM Sans', 'left', width - 6));
+    ctx.save(); ctx.lineWidth = mm(.25); drawIcon(ctx, ICONS.heart, mm(x1 - 2), mm(top + 5.8), mm(3.2), false); ctx.restore();
+    const bar = top + 11, played = .38;
+    faint(.2, () => { ctx.fillRect(mm(x0), mm(bar - .3), mm(width), mm(.6)); });
+    ctx.fillRect(mm(x0), mm(bar - .3), mm(width * played), mm(.6));
+    ctx.beginPath(); ctx.arc(mm(x0 + width * played), mm(bar), mm(1), 0, Math.PI * 2); ctx.fill();
+    faint(.55, () => { text('1:24', x0, bar + 2.2, 1.6, 'DM Sans', 'left'); text('-2:13', x1, bar + 2.2, 1.6, 'DM Sans', 'right'); });
+    const controls = top + 16.4;
+    drawIcon(ctx, ICONS.prev, mm(cx - 10), mm(controls), mm(3.4));
+    drawIcon(ctx, ICONS.pause, mm(cx), mm(controls), mm(4.4));
+    drawIcon(ctx, ICONS.next, mm(cx + 10), mm(controls), mm(3.4));
+  } else if (p.style === 'ticket') {
+    ctx.save(); ctx.lineWidth = mm(.25); ctx.strokeRect(mm(x0), mm(top + 1.6), mm(width), mm(16.2)); ctx.setLineDash([mm(.8), mm(.6)]);
+    ctx.beginPath(); ctx.moveTo(mm(x1 - 10), mm(top + 1.6)); ctx.lineTo(mm(x1 - 10), mm(top + 17.8)); ctx.stroke(); ctx.restore();
+    const main = x0 + (width - 10) / 2;
+    faint(.6, () => text('ADMIT ONE', main, top + 4.4, 1.7, 'DM Sans', 'center', width - 14, '700'));
+    text(p.caption || 'Movie night', main, top + 9.2, 3.6, p.font === 'Caveat' ? 'Special Elite' : p.font, 'center', width - 14);
+    faint(.7, () => text(p.note || 'Row F · Seat 12', main, top + 14.4, 1.9, 'DM Sans', 'center', width - 14));
+    ctx.save(); ctx.translate(mm(x1 - 5), mm(top + 9.7)); ctx.rotate(-Math.PI / 2); text(`No. ${serial(p.id)}`, 0, 0, 1.8, 'DM Sans', 'center', 14, '600'); ctx.restore();
+  } else {
+    const parts = (p.caption || 'CGN → BCN').split(/\s*(?:→|->|–|—|-|>|✈|\bto\b)\s*/i).filter(Boolean);
+    faint(.55, () => { text('BOARDING PASS', cx, top + 2.6, 1.5, 'DM Sans', 'center', width, '700'); });
+    if (parts.length === 2) {
+      faint(.55, () => { text('FROM', x0, top + 4.6, 1.4, 'DM Sans', 'left'); text('TO', x1, top + 4.6, 1.4, 'DM Sans', 'right'); });
+      text(parts[0].toUpperCase(), x0, top + 8.6, 5.4, 'DM Sans', 'left', width / 2 - 5, '700');
+      text(parts[1].toUpperCase(), x1, top + 8.6, 5.4, 'DM Sans', 'right', width / 2 - 5, '700');
+      ctx.save(); ctx.translate(mm(cx), mm(top + 8.6)); ctx.rotate(Math.PI / 2); drawIcon(ctx, ICONS.plane, 0, 0, mm(4)); ctx.restore();
+    } else text(p.caption, cx, top + 8.4, 4.4, 'DM Sans', 'center', width, '700');
+    ctx.save(); ctx.globalAlpha = .4; ctx.lineWidth = mm(.2); ctx.setLineDash([mm(.8), mm(.6)]); ctx.beginPath(); ctx.moveTo(mm(x0), mm(top + 12.4)); ctx.lineTo(mm(x1), mm(top + 12.4)); ctx.stroke(); ctx.restore();
+    const barcode = Math.min(16, width * .35);
+    faint(.75, () => text(p.note || '03 NOV · GATE B12 · SEAT 14A', x0, top + 16, 1.8, 'DM Sans', 'left', width - barcode - 2, '600'));
+    let seed = Number(serial(p.id + p.caption, 6)) + 1, bx = x1 - barcode;
+    while (bx < x1 - .3) { seed = (seed * 1103515245 + 12345) >>> 0; const bw = .2 + (seed % 4) * .15; ctx.fillRect(mm(bx), mm(top + 14), mm(Math.min(bw, x1 - bx)), mm(4)); bx += bw + .25 + (seed >> 8) % 3 * .12; }
+  }
+}
+// The reagent spreads unevenly from the pod end: a ragged image edge, dark goo
+// along the top and a few drips. Seeded by the photo id, so each print keeps its own.
+function drawPeelEdges(ctx: CanvasRenderingContext2D, image: HTMLCanvasElement, p: Photo, pxPerMm: number, x: number, y: number, w: number, h: number) {
+  let seed = Number(serial(p.id, 6)) + 3;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  // Smooth wobble: random knots every few millimetres, eased between, plus a fine grain.
+  const wobble = (length: number, amp: number, spacing = 3.5) => {
+    const knots = Array.from({ length: Math.ceil(length / spacing) + 2 }, () => rand() * amp);
+    return (t: number) => { const i = Math.floor(t / spacing), f = (1 - Math.cos((t / spacing - i) * Math.PI)) / 2; return knots[i] + (knots[i + 1] - knots[i]) * f + (rand() - .5) * .08; };
+  };
+  const mm = (v: number) => v * pxPerMm, step = .5;
+  const top = wobble(w, 1.6), right = wobble(h, .6, 6), bottom = wobble(w, .7, 5), left = wobble(h, .6, 6);
+  const path = new Path2D();
+  for (let i = 0; i <= w; i += step) path.lineTo(mm(x + i), mm(y + top(i)));
+  for (let i = 0; i <= h; i += step) path.lineTo(mm(x + w - right(i)), mm(y + i));
+  for (let i = w; i >= 0; i -= step) path.lineTo(mm(x + i), mm(y + h - bottom(i)));
+  for (let i = h; i >= 0; i -= step) path.lineTo(mm(x + left(i)), mm(y + i));
+  path.closePath();
+  ctx.save(); ctx.clip(path); ctx.drawImage(image, mm(x), mm(y), mm(w), mm(h)); ctx.restore();
+  // Reagent band at the pod end, with drips that run out of it into the image.
+  const band = wobble(w + 1, 1.8, 4.5), goo = new Path2D();
+  goo.moveTo(mm(x - .5), mm(y - .3));
+  for (let i = 0; i <= w + 1; i += step) goo.lineTo(mm(x - .5 + i), mm(y + .5 + band(i)));
+  goo.lineTo(mm(x + w + .5), mm(y - .3)); goo.closePath();
+  for (let i = 0, count = 3 + Math.floor(rand() * 4); i < count; i++) {
+    const at = 3 + rand() * (w - 6), base = y + .5 + band(at + .5) - .2, len = 1.2 + rand() ** 2 * 7, half = .35 + rand() * .55;
+    goo.moveTo(mm(x + at - half * 1.8), mm(base));
+    goo.quadraticCurveTo(mm(x + at - half), mm(base + len * .45), mm(x + at - half * .55), mm(base + len - half));
+    goo.arc(mm(x + at), mm(base + len - half), mm(half * .55), Math.PI, 0, true);
+    goo.quadraticCurveTo(mm(x + at + half), mm(base + len * .45), mm(x + at + half * 1.8), mm(base));
+    goo.closePath();
+  }
+  ctx.save(); ctx.fillStyle = 'rgba(30,24,19,.9)'; ctx.fill(goo);
+  // Thin faint streaks where the reagent ran along the long sides.
+  ctx.globalAlpha = .35; ctx.strokeStyle = '#1e1813'; ctx.lineCap = 'round';
+  for (const side of [x + left(2) + .15, x + w - right(2) - .15]) { const run = h * (.15 + rand() * .45); ctx.lineWidth = mm(.15 + rand() * .25); ctx.beginPath(); ctx.moveTo(mm(side), mm(y + 1.5)); ctx.lineTo(mm(side), mm(y + 1.5 + run)); ctx.stroke(); }
+  ctx.restore();
+}
+function inkFor(frame: string) { return frame === '#302b38' ? '#fffdf7' : '#302b38'; }
 export function renderPhoto(p: Photo, pxPerMm = 10, format: PrintFormat = 'mini'): HTMLCanvasElement {
-  const spec = formats[format], imageX = (spec.width - spec.imageWidth) / 2;
-  const c = document.createElement('canvas'); c.width = Math.round(spec.width * pxPerMm); c.height = Math.round(spec.height * pxPerMm);
+  const spec = formats[format], size = photoSize(format), imageX = (spec.width - spec.imageWidth) / 2;
+  const c = document.createElement('canvas'); c.width = Math.round(size.width * pxPerMm); c.height = Math.round(size.height * pxPerMm);
   const ctx = c.getContext('2d', { colorSpace: 'srgb' })!; ctx.fillStyle = p.frame; ctx.fillRect(0, 0, c.width, c.height);
   const image = photographicImage(p, pxPerMm, format);
-  ctx.drawImage(image, imageX * pxPerMm, 4 * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
+  if (format === 'peel') drawPeelEdges(ctx, image, p, pxPerMm, imageX, 4, spec.imageWidth, spec.imageHeight);
+  else ctx.drawImage(image, imageX * pxPerMm, 4 * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
   if (pxPerMm >= PRINT_PX_PER_MM) { image.width = 1; image.height = 1; }
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = p.frame === '#302b38' ? '#fffdf7' : '#302b38';
+  if (p.stamp) drawStamp(ctx, p.stamp, imageX + spec.imageWidth - 2.2, 4 + spec.imageHeight - 2.2, pxPerMm, format === 'strip' ? 2 : 2.4);
+  if (format === 'strip') return c;
+  const ink = inkFor(p.frame);
+  if (format === 'peel') {
+    // A pen note on the narrow lower margin, the way pulled prints were labelled.
+    ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const text = [p.caption.replace(/[♡☆✧❀☾☼∞⋈]/gu, '').trim(), p.note].filter(Boolean).join(' · ');
+    let size = 3.4 * pxPerMm; ctx.font = `${size}px "${p.font}"`;
+    while (ctx.measureText(text).width > spec.imageWidth * pxPerMm && size > pxPerMm * 1.4) { size -= .5; ctx.font = `${size}px "${p.font}"`; }
+    ctx.fillText(text, spec.width / 2 * pxPerMm, (4 + spec.imageHeight + 4.4) * pxPerMm, spec.imageWidth * pxPerMm); return c;
+  }
+  if (p.style && p.style !== 'classic') { drawStyledCaption(ctx, p, pxPerMm, imageX, spec.imageWidth, 4 + spec.imageHeight, ink); return c; }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ink;
   const fitText = (text: string, y: number, size: number, font: string) => { let s = size * pxPerMm; ctx.font = `${s}px "${font}"`; while (ctx.measureText(text).width > spec.imageWidth * pxPerMm && s > pxPerMm * 1.2) { s -= .5; ctx.font = `${s}px "${font}"`; } ctx.fillText(text, spec.width / 2 * pxPerMm, y * pxPerMm, spec.imageWidth * pxPerMm); };
   if (captionRuns(p.caption).some(r => r.doodle)) drawCaption(ctx, p, pxPerMm, spec.imageWidth);
   else fitText(p.caption, 74.7, p.font === 'Caveat' ? 5 : p.font === 'Permanent Marker' ? 3.7 : 3.3, p.font);
   ctx.globalAlpha = .62; fitText(p.note, 81.2, 2.25, 'DM Sans'); return c;
+}
+// A whole booth strip: up to four cells, then the first photo's caption at the foot.
+export function renderStrip(photos: Photo[], pxPerMm = 10): HTMLCanvasElement {
+  const spec = formats.strip, first = photos[0], c = document.createElement('canvas');
+  c.width = Math.round(spec.width * pxPerMm); c.height = Math.round(spec.height * pxPerMm);
+  const ctx = c.getContext('2d', { colorSpace: 'srgb' })!; ctx.fillStyle = first?.frame ?? '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 4; i++) {
+    const y = 3 + i * 32.5, p = photos[i];
+    if (!p) { ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.04)'; ctx.fillRect(3 * pxPerMm, y * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm); ctx.restore(); continue; }
+    const cell = renderPhoto({ ...p, frame: first.frame }, pxPerMm, 'strip');
+    ctx.drawImage(cell, 0, 4 * pxPerMm, cell.width, spec.imageHeight * pxPerMm, 0, y * pxPerMm, cell.width, spec.imageHeight * pxPerMm);
+    cell.width = 1; cell.height = 1;
+  }
+  if (first) {
+    ctx.fillStyle = inkFor(first.frame); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const fit = (text: string, y: number, size: number, font: string) => { let s = size * pxPerMm; ctx.font = `${s}px "${font}"`; while (ctx.measureText(text).width > spec.imageWidth * pxPerMm && s > pxPerMm * 1.2) { s -= .5; ctx.font = `${s}px "${font}"`; } ctx.fillText(text, spec.width / 2 * pxPerMm, y * pxPerMm, spec.imageWidth * pxPerMm); };
+    fit(first.caption.replace(/[♡☆✧❀☾☼∞⋈]/gu, '').trim(), 136.6, first.font === 'Caveat' ? 4.4 : 3.2, first.font);
+    ctx.globalAlpha = .62; fit(first.note, 142, 1.9, 'DM Sans');
+  }
+  return c;
 }
 export type Paper = { width: number; height: number };
 export type Slot = { x: number; y: number; w: number; h: number; rotate: boolean };
@@ -276,20 +442,27 @@ export function sheetLayout(paper: Paper, format: PrintFormat = 'mini', mode: La
   }
   return { capacity, slots: best!.slots, lines: best!.lines };
 }
+// Canvas text only uses faces the document has already fetched, including bold weights.
+export function loadFonts(photos: Photo[]) {
+  const faces = new Set(['16px "DM Sans"', '600 16px "DM Sans"', '700 16px "DM Sans"']);
+  for (const p of photos) { faces.add(`16px "${p.font}"`); if (p.style === 'ticket') faces.add('16px "Special Elite"'); }
+  return Promise.all([...faces].map(face => document.fonts.load(face))).then(() => document.fonts.ready);
+}
 export type SheetOptions = { format: PrintFormat; mode: LayoutMode; labels?: string[] };
 export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean, pxPerMm = PRINT_PX_PER_MM, options: SheetOptions = { format: 'mini', mode: 'easy' }) {
   // Font faces inside closed style controls may not have been requested yet.
-  await Promise.all([...new Set([...photos.map(photo => photo.font), 'DM Sans'])].map(font => document.fonts.load(`16px "${font}"`)));
+  await loadFonts(photos);
   await document.fonts.ready;
-  const labels = options.labels ?? [], spec = formats[options.format];
-  const { slots, lines } = sheetLayout(paper, options.format, options.mode, labels.length > 0, photos.length);
+  const labels = options.labels ?? [], spec = formats[options.format], per = photosPerPrint(options.format);
+  const prints = Array.from({ length: Math.ceil(photos.length / per) }, (_, i) => photos.slice(i * per, i * per + per));
+  const { slots, lines } = sheetLayout(paper, options.format, options.mode, labels.length > 0, prints.length);
   const c = document.createElement('canvas'); c.width = Math.round(paper.width * pxPerMm); c.height = Math.round(paper.height * pxPerMm);
   const ctx = c.getContext('2d', { colorSpace: 'srgb' })!; ctx.imageSmoothingQuality = 'high'; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
     // Give loading feedback and input events a turn between high-resolution prints.
     if (pxPerMm >= PRINT_PX_PER_MM) await new Promise(resolve => setTimeout(resolve, 0));
-    const image = renderPhoto(photos[i], pxPerMm, options.format); ctx.save(); ctx.translate(s.x * pxPerMm, s.y * pxPerMm);
+    const image = per > 1 ? renderStrip(prints[i], pxPerMm) : renderPhoto(photos[i], pxPerMm, options.format); ctx.save(); ctx.translate(s.x * pxPerMm, s.y * pxPerMm);
     if (s.rotate) { ctx.translate(s.w * pxPerMm, 0); ctx.rotate(Math.PI / 2); }
     ctx.drawImage(image, 0, 0, spec.width * pxPerMm, spec.height * pxPerMm); ctx.restore();
     image.width = 1; image.height = 1;

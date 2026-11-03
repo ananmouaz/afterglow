@@ -205,3 +205,5 @@ html.keyboard-open .print-settings>.primary-button{position:static;width:100%;ma
 }
 html.keyboard-open.large-text .editing{overflow:auto}
 html.keyboard-open.large-text .live-preview{display:none}
+.print-styles{margin:0 0 20px}.stamp-row{margin-top:20px}.stamp-input{font-variant-numeric:tabular-nums;letter-spacing:1px;color:#c25a00}
+.print-styles button,.print-styles button:first-child{font-size:var(--text-small);font-family:'DM Sans',sans-serif}

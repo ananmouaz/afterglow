@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import ts from 'typescript';
 const source = await readFile(new URL('../src/engine.ts', import.meta.url), 'utf8');
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { sheetLayout, guideLines, badgeSpot, paginate, formats } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const { sheetLayout, guideLines, badgeSpot, paginate, formats, todayStamp, STAMP_CHARS } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 const eps = 1e-5;
-const expected = { mini: [[2, 2], [2, 2], [3, 3], [4, 4], [4, 5], [10, 11]], square: [[1, 1], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], wide: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]] };
+const expected = { mini: [[2, 2], [2, 2], [3, 3], [4, 4], [4, 5], [10, 11]], square: [[1, 1], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], wide: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]], strip: [[0, 0], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], peel: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]] };
 const papers = [{ width: 90, height: 130 }, { width: 100, height: 150 }, { width: 110, height: 170 }, { width: 130, height: 180 }, { width: 150, height: 200 }, { width: 200, height: 300 }];
 const [p15x20, p20x30] = [papers[4], papers[5]];
 function verify(plan, paper, format, count) {
@@ -35,6 +35,7 @@ function verify(plan, paper, format, count) {
 }
 for (const format of Object.keys(formats)) for (const [i, paper] of papers.entries()) for (const [j, mode] of ['easy', 'dense'].entries()) {
   test(`${format} ${paper.width}x${paper.height} ${mode}: capacity and all partial sheets`, () => {
+    if (!expected[format][i][j]) { assert.throws(() => sheetLayout(paper, format, mode), /too small/); return; }
     const capacity = sheetLayout(paper, format, mode).capacity;
     assert.equal(capacity, expected[format][i][j]);
     for (let count = 0; count <= capacity; count++) verify(sheetLayout(paper, format, mode, false, count), paper, format, count);
@@ -49,7 +50,7 @@ test('four Minis share borders and need six cut lines', () => {
 });
 test('calibration labels retain a 4mm row gap for each format', () => {
   for (const format of Object.keys(formats)) {
-    const paper = format === 'wide' ? p20x30 : p15x20;
+    const paper = ['wide', 'strip', 'peel'].includes(format) ? p20x30 : p15x20;
     const plan = sheetLayout(paper, format, 'dense', true, 4);
     verify(plan, paper, format, 4);
     for (const a of plan.slots) for (const b of plan.slots) if (b.y > a.y && Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > eps) assert.ok(b.y - (a.y + a.h) >= 4 - eps);
@@ -85,6 +86,15 @@ test('cut-number badges stay on paper and off every print', () => {
   }
   const plan = sheetLayout(papers[4], 'mini', 'easy', false, 4);
   assert.ok(guideLines(plan.lines, plan.slots, papers[4]).every(g => badgeSpot(g, plan.slots, papers[4])), 'a 2×2 grid numbers every cut');
+});
+test('two booth strips share one 10 × 15 cm print', () => {
+  const plan = sheetLayout(papers[1], 'strip', 'easy', false, 2);
+  verify(plan, papers[1], 'strip', 2);
+  assert.equal(plan.slots[1].x, plan.slots[0].x + 48);
+});
+test('date stamps read like a film-camera date back', () => {
+  assert.equal(todayStamp(new Date(2026, 10, 3)), "'26 11 03");
+  assert.equal('3.11.26 ab!'.replace(STAMP_CHARS, ''), '3.11.26 ');
 });
 test('invalid papers fail explicitly', () => {
   for (const paper of [{ width: 0, height: 200 }, { width: NaN, height: 200 }, { width: 500, height: 200 }, { width: 50, height: 50 }]) assert.throws(() => sheetLayout(paper));
