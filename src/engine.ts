@@ -10,7 +10,7 @@ export const formats = {
 export type PrintFormat = keyof typeof formats;
 export const formatChoices = Object.keys(formats) as PrintFormat[];
 export type LayoutMode = 'easy' | 'dense';
-export const paperChoices = [{ width: 100, height: 150 }, { width: 150, height: 200 }, { width: 200, height: 300 }];
+export const paperChoices = [{ width: 90, height: 130 }, { width: 100, height: 150 }, { width: 110, height: 170 }, { width: 130, height: 180 }, { width: 150, height: 200 }, { width: 200, height: 300 }];
 export type Photo = { id: string; src: string; image: HTMLImageElement; caption: string; note: string; font: string; frame: string; film: Film; strength: number; exposure: number; softening: number; flash: number; grain: number; leak: boolean; zoom: number; panX: number; panY: number; rotation: number; sample: boolean };
 export const films: { id: Film; name: string; description: string; color: string }[] = [
   { id: 'original', name: 'Original', description: 'Your colors, untouched', color: '#a9c4b5' },
