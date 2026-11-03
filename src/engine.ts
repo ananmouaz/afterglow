@@ -10,12 +10,14 @@ export const formats = {
   peel: { name: 'Peel-apart', width: 83, height: 108, imageWidth: 73, imageHeight: 95 },
   // Photo-booth strip: four photos per print. Two fit side by side on 10 × 15 cm paper.
   strip: { name: 'Strip', width: 48, height: 146, imageWidth: 42, imageHeight: 30, photos: 4 },
+  // Matchbook: a fold-up cover strip beside two photo cards that sit inside like matches.
+  matchbook: { name: 'Matchbook', width: 92, height: 125, imageWidth: 40, imageHeight: 38, photos: 2 },
 } as const;
 // Formats with a caption band that can take the ticket, boarding-pass and player styles.
-export const supportsStyles = (format: PrintFormat) => format !== 'strip' && format !== 'peel';
+export const supportsStyles = (format: PrintFormat) => format !== 'strip' && format !== 'peel' && format !== 'matchbook';
 export const photosPerPrint = (format: PrintFormat) => 'photos' in formats[format] ? (formats[format] as { photos: number }).photos : 1;
 // What one photo looks like on its own: a whole print, or one strip cell.
-export const photoSize = (format: PrintFormat) => format === 'strip' ? { width: 48, height: 38 } : formats[format];
+export const photoSize = (format: PrintFormat) => format === 'strip' ? { width: 48, height: 38 } : format === 'matchbook' ? { width: 44, height: 52 } : formats[format];
 export type PrintFormat = keyof typeof formats;
 export const formatChoices = Object.keys(formats) as PrintFormat[];
 export type LayoutMode = 'easy' | 'dense';
@@ -303,7 +305,7 @@ function drawPeelEdges(ctx: CanvasRenderingContext2D, image: HTMLCanvasElement, 
 }
 function inkFor(frame: string) { return frame === '#302b38' ? '#fffdf7' : '#302b38'; }
 export function renderPhoto(p: Photo, pxPerMm = 10, format: PrintFormat = 'mini'): HTMLCanvasElement {
-  const spec = formats[format], size = photoSize(format), imageX = (spec.width - spec.imageWidth) / 2;
+  const spec = formats[format], size = photoSize(format), imageX = (size.width - spec.imageWidth) / 2;
   const c = document.createElement('canvas'); c.width = Math.round(size.width * pxPerMm); c.height = Math.round(size.height * pxPerMm);
   const ctx = c.getContext('2d', { colorSpace: 'srgb' })!; ctx.fillStyle = p.frame; ctx.fillRect(0, 0, c.width, c.height);
   const image = photographicImage(p, pxPerMm, format);
@@ -311,7 +313,7 @@ export function renderPhoto(p: Photo, pxPerMm = 10, format: PrintFormat = 'mini'
   else ctx.drawImage(image, imageX * pxPerMm, 4 * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
   if (pxPerMm >= PRINT_PX_PER_MM) { image.width = 1; image.height = 1; }
   if (p.stamp) drawStamp(ctx, p.stamp, imageX + spec.imageWidth - 2.2, 4 + spec.imageHeight - 2.2, pxPerMm, format === 'strip' ? 2 : 2.4);
-  if (format === 'strip') return c;
+  if (format === 'strip' || format === 'matchbook') return c;
   const ink = inkFor(p.frame);
   if (format === 'peel') {
     // A pen note on the narrow lower margin, the way pulled prints were labelled.
@@ -448,6 +450,58 @@ export function loadFonts(photos: Photo[]) {
   for (const p of photos) { faces.add(`16px "${p.font}"`); if (p.style === 'ticket') faces.add('16px "Special Elite"'); }
   return Promise.all([...faces].map(face => document.fonts.load(face))).then(() => document.fonts.ready);
 }
+// Flat matchbook, outside face up. Top to bottom: front cover, spine, back cover,
+// spine, striker flap. Front and flap fold over, so they print upside down.
+const MATCH = { cover: 48, front: 52, spine: 3, back: 55, flap: 12 };
+export function renderMatchbook(photos: Photo[], pxPerMm = 10): HTMLCanvasElement {
+  const spec = formats.matchbook, first = photos[0], c = document.createElement('canvas');
+  c.width = Math.round(spec.width * pxPerMm); c.height = Math.round(spec.height * pxPerMm);
+  const ctx = c.getContext('2d', { colorSpace: 'srgb' })!, mm = (v: number) => v * pxPerMm;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  const { cover, front, spine, back, flap } = MATCH, backTop = front + spine, flapTop = backTop + back + spine;
+  const color = first?.frame ?? '#302b38', ink = inkFor(color);
+  ctx.fillStyle = color; ctx.fillRect(0, 0, mm(cover), mm(flapTop + flap));
+  const text = (t: string, x: number, y: number, size: number, font: string, max: number, weight = '', spacing = 0) => {
+    let s = size; const set = () => { ctx.font = `${weight} ${mm(s)}px "${font}"`; ctx.letterSpacing = `${mm(spacing * s / size)}px`; };
+    set(); while (ctx.measureText(t).width > mm(max) && s > 1) { s -= .1; set(); }
+    ctx.fillText(t, mm(x), mm(y)); ctx.letterSpacing = '0px';
+  };
+  const upsideDown = (cx: number, cy: number, draw: () => void) => { ctx.save(); ctx.translate(mm(cx), mm(cy)); ctx.rotate(Math.PI); ctx.translate(-mm(cx), -mm(cy)); draw(); ctx.restore(); };
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ctx.strokeStyle = ink;
+  const name = first?.caption.replace(/[♡☆✧❀☾☼∞⋈]/gu, '').trim() || 'Hotel Afterglow';
+  const year = first?.note.match(/\b(19|20)\d{2}\b/)?.[0] ?? String(new Date().getFullYear());
+  const place = (first?.note ?? '').replace(/\b(19|20)\d{2}\b/, '').replace(/[·,\s]+$/, '').trim();
+  // Front cover, read with the hinge at the top; its lower 12 mm hides under the flap.
+  upsideDown(cover / 2, front / 2, () => {
+    ctx.lineWidth = mm(.3); ctx.strokeRect(mm(3), mm(3), mm(cover - 6), mm(front - flap - 5));
+    ctx.lineWidth = mm(.15); ctx.strokeRect(mm(3.9), mm(3.9), mm(cover - 7.8), mm(front - flap - 6.8));
+    text(`EST. ${year}`, cover / 2, 9, 1.7, 'DM Sans', cover - 12, '700', .5);
+    text(name, cover / 2, 19, 6, first?.font ?? 'Caveat', cover - 11);
+    ctx.save(); ctx.globalAlpha = .7; ctx.lineWidth = mm(.2); ctx.beginPath(); ctx.moveTo(mm(12), mm(26)); ctx.lineTo(mm(cover - 12), mm(26)); ctx.stroke(); ctx.restore();
+    if (place) text(place.toUpperCase(), cover / 2, 30.5, 1.8, 'DM Sans', cover - 12, '600', .35);
+  });
+  // Back cover, read from behind with the hinge at the top.
+  const memories = photos.length === 1 ? '1 MEMORY INSIDE' : `${photos.length} MEMORIES INSIDE`;
+  text(memories, cover / 2, backTop + back / 2 - 2.5, 1.8, 'DM Sans', cover - 10, '700', .5);
+  ctx.save(); ctx.globalAlpha = .65; text('OPEN WITH CARE', cover / 2, backTop + back / 2 + 2.2, 1.4, 'DM Sans', cover - 10, '600', .4); ctx.restore();
+  // Striker flap: a gritty band and the classic warning, folded up over the front.
+  upsideDown(cover / 2, flapTop + flap / 2, () => {
+    let seed = 41; const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    ctx.save(); ctx.fillStyle = '#5b4a3c'; ctx.fillRect(mm(4), mm(flapTop + 5), mm(cover - 8), mm(4.4));
+    ctx.fillStyle = 'rgba(255,240,220,.18)'; for (let i = 0; i < (cover - 8) * 4.4 * 6; i++) ctx.fillRect(mm(4 + rand() * (cover - 8)), mm(flapTop + 5 + rand() * 4.4), mm(.12), mm(.12));
+    ctx.restore(); text('CLOSE COVER BEFORE STRIKING', cover / 2, flapTop + 2.7, 1.25, 'DM Sans', cover - 8, '700', .3);
+  });
+  // Score lines across the spines, then the cards that sit inside like matches.
+  ctx.save(); ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = Math.max(mm(.08), 1); ctx.setLineDash([mm(2), mm(.7), mm(.3), mm(.7)]);
+  for (const y of [front, backTop, backTop + back, flapTop]) { ctx.beginPath(); ctx.moveTo(0, mm(y)); ctx.lineTo(mm(cover), mm(y)); ctx.stroke(); }
+  ctx.setLineDash([mm(1), mm(.8)]); ctx.strokeStyle = '#d4d4d4';
+  ctx.beginPath(); ctx.moveTo(mm(cover), 0); ctx.lineTo(mm(cover), mm(spec.height));
+  const card = photoSize('matchbook');
+  for (let i = 1; i <= 2; i++) { ctx.moveTo(mm(cover), mm(card.height * i)); ctx.lineTo(mm(spec.width), mm(card.height * i)); }
+  ctx.stroke(); ctx.restore();
+  photos.slice(0, 2).forEach((p, i) => { const img = renderPhoto({ ...p, frame: color }, pxPerMm, 'matchbook'); ctx.drawImage(img, mm(cover), mm(card.height * i)); img.width = 1; img.height = 1; });
+  return c;
+}
 export type SheetOptions = { format: PrintFormat; mode: LayoutMode; labels?: string[] };
 export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean, pxPerMm = PRINT_PX_PER_MM, options: SheetOptions = { format: 'mini', mode: 'easy' }) {
   // Font faces inside closed style controls may not have been requested yet.
@@ -462,7 +516,7 @@ export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean
     const s = slots[i];
     // Give loading feedback and input events a turn between high-resolution prints.
     if (pxPerMm >= PRINT_PX_PER_MM) await new Promise(resolve => setTimeout(resolve, 0));
-    const image = per > 1 ? renderStrip(prints[i], pxPerMm) : renderPhoto(photos[i], pxPerMm, options.format); ctx.save(); ctx.translate(s.x * pxPerMm, s.y * pxPerMm);
+    const image = options.format === 'strip' ? renderStrip(prints[i], pxPerMm) : options.format === 'matchbook' ? renderMatchbook(prints[i], pxPerMm) : renderPhoto(photos[i], pxPerMm, options.format); ctx.save(); ctx.translate(s.x * pxPerMm, s.y * pxPerMm);
     if (s.rotate) { ctx.translate(s.w * pxPerMm, 0); ctx.rotate(Math.PI / 2); }
     ctx.drawImage(image, 0, 0, spec.width * pxPerMm, spec.height * pxPerMm); ctx.restore();
     image.width = 1; image.height = 1;
