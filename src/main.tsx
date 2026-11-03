@@ -27,6 +27,8 @@ const Print = memo(function Print({ photo, format, pxPerMm: requestedScale, clas
   }, [photo, format, pxPerMm]);
   return <canvas ref={canvas} width={formats[format].width * pxPerMm} height={formats[format].height * pxPerMm} className={className} aria-label={`Instant photo${photo.caption ? `: ${photo.caption}` : ''}`} role="img"/>;
 });
+// Dev only: `?demo=4` opens the print page with 4 sample prints, for checking sheets.
+const demoCount = import.meta.env.DEV ? Math.min(MAX_PHOTOS, Math.max(0, Math.floor(Number(new URLSearchParams(location.search).get('demo'))) || 0)) : 0;
 function WelcomePrint({ format }: { format: PrintFormat }) {
   const [sample, setSample] = useState<Photo | null>(null);
   useEffect(() => {
@@ -99,9 +101,14 @@ function App() {
   const priceError = price.trim() && (!/^(?:\d+(?:[.,]\d{1,2})?|[.,]\d{1,2})$/.test(price.trim()) || Number(price.replace(',', '.')) > 999) ? 'Enter €0 to €999 with up to two decimal places.' : '';
   const totalCost = price.trim() && !priceError ? pages.length * Number(price.replace(',', '.')) : null;
   useEffect(() => setPageIndex(i => Math.min(i, Math.max(0, pages.length - 1))), [pages.length]);
+  useEffect(() => {
+    if (!demoCount) return;
+    const src = `${import.meta.env.BASE_URL}demo-beach.jpg`;
+    loadImage(src).then(image => { setTray(Array.from({ length: demoCount }, (_, i) => ({ ...newPhoto(image, src, true), caption: `Demo print ${i + 1}` }))); setScreen('print'); }).catch(() => {});
+  }, []);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => {
-    if (!tray.length && !photo) return;
+    if ((!tray.length && !photo) || demoCount) return;
     const preventLoss = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', preventLoss);
     return () => window.removeEventListener('beforeunload', preventLoss);
