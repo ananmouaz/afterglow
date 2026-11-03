@@ -6,9 +6,13 @@ export const formats = {
   mini: { name: 'Mini', width: 54, height: 86, imageWidth: 46, imageHeight: 62 },
   square: { name: 'Square', width: 72, height: 86, imageWidth: 62, imageHeight: 62 },
   wide: { name: 'Wide', width: 108, height: 86, imageWidth: 99, imageHeight: 62 },
+  // Peel-apart instant: the image keeps the ragged, chemical-streaked edge of a pulled print.
+  peel: { name: 'Peel-apart', width: 83, height: 108, imageWidth: 73, imageHeight: 95 },
   // Photo-booth strip: four photos per print. Two fit side by side on 10 × 15 cm paper.
   strip: { name: 'Strip', width: 48, height: 146, imageWidth: 42, imageHeight: 30, photos: 4 },
 } as const;
+// Formats with a caption band that can take the ticket, boarding-pass and player styles.
+export const supportsStyles = (format: PrintFormat) => format !== 'strip' && format !== 'peel';
 export const photosPerPrint = (format: PrintFormat) => 'photos' in formats[format] ? (formats[format] as { photos: number }).photos : 1;
 // What one photo looks like on its own: a whole print, or one strip cell.
 export const photoSize = (format: PrintFormat) => format === 'strip' ? { width: 48, height: 38 } : formats[format];
@@ -259,17 +263,64 @@ function drawStyledCaption(ctx: CanvasRenderingContext2D, p: Photo, pxPerMm: num
     while (bx < x1 - .3) { seed = (seed * 1103515245 + 12345) >>> 0; const bw = .2 + (seed % 4) * .15; ctx.fillRect(mm(bx), mm(top + 14), mm(Math.min(bw, x1 - bx)), mm(4)); bx += bw + .25 + (seed >> 8) % 3 * .12; }
   }
 }
+// The reagent spreads unevenly from the pod end: a ragged image edge, dark goo
+// along the top and a few drips. Seeded by the photo id, so each print keeps its own.
+function drawPeelEdges(ctx: CanvasRenderingContext2D, image: HTMLCanvasElement, p: Photo, pxPerMm: number, x: number, y: number, w: number, h: number) {
+  let seed = Number(serial(p.id, 6)) + 3;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  // Smooth wobble: random knots every few millimetres, eased between, plus a fine grain.
+  const wobble = (length: number, amp: number, spacing = 3.5) => {
+    const knots = Array.from({ length: Math.ceil(length / spacing) + 2 }, () => rand() * amp);
+    return (t: number) => { const i = Math.floor(t / spacing), f = (1 - Math.cos((t / spacing - i) * Math.PI)) / 2; return knots[i] + (knots[i + 1] - knots[i]) * f + (rand() - .5) * .08; };
+  };
+  const mm = (v: number) => v * pxPerMm, step = .5;
+  const top = wobble(w, 1.6), right = wobble(h, .6, 6), bottom = wobble(w, .7, 5), left = wobble(h, .6, 6);
+  const path = new Path2D();
+  for (let i = 0; i <= w; i += step) path.lineTo(mm(x + i), mm(y + top(i)));
+  for (let i = 0; i <= h; i += step) path.lineTo(mm(x + w - right(i)), mm(y + i));
+  for (let i = w; i >= 0; i -= step) path.lineTo(mm(x + i), mm(y + h - bottom(i)));
+  for (let i = h; i >= 0; i -= step) path.lineTo(mm(x + left(i)), mm(y + i));
+  path.closePath();
+  ctx.save(); ctx.clip(path); ctx.drawImage(image, mm(x), mm(y), mm(w), mm(h)); ctx.restore();
+  // Reagent band at the pod end, with drips that run out of it into the image.
+  const band = wobble(w + 1, 1.8, 4.5), goo = new Path2D();
+  goo.moveTo(mm(x - .5), mm(y - .3));
+  for (let i = 0; i <= w + 1; i += step) goo.lineTo(mm(x - .5 + i), mm(y + .5 + band(i)));
+  goo.lineTo(mm(x + w + .5), mm(y - .3)); goo.closePath();
+  for (let i = 0, count = 3 + Math.floor(rand() * 4); i < count; i++) {
+    const at = 3 + rand() * (w - 6), base = y + .5 + band(at + .5) - .2, len = 1.2 + rand() ** 2 * 7, half = .35 + rand() * .55;
+    goo.moveTo(mm(x + at - half * 1.8), mm(base));
+    goo.quadraticCurveTo(mm(x + at - half), mm(base + len * .45), mm(x + at - half * .55), mm(base + len - half));
+    goo.arc(mm(x + at), mm(base + len - half), mm(half * .55), Math.PI, 0, true);
+    goo.quadraticCurveTo(mm(x + at + half), mm(base + len * .45), mm(x + at + half * 1.8), mm(base));
+    goo.closePath();
+  }
+  ctx.save(); ctx.fillStyle = 'rgba(30,24,19,.9)'; ctx.fill(goo);
+  // Thin faint streaks where the reagent ran along the long sides.
+  ctx.globalAlpha = .35; ctx.strokeStyle = '#1e1813'; ctx.lineCap = 'round';
+  for (const side of [x + left(2) + .15, x + w - right(2) - .15]) { const run = h * (.15 + rand() * .45); ctx.lineWidth = mm(.15 + rand() * .25); ctx.beginPath(); ctx.moveTo(mm(side), mm(y + 1.5)); ctx.lineTo(mm(side), mm(y + 1.5 + run)); ctx.stroke(); }
+  ctx.restore();
+}
 function inkFor(frame: string) { return frame === '#302b38' ? '#fffdf7' : '#302b38'; }
 export function renderPhoto(p: Photo, pxPerMm = 10, format: PrintFormat = 'mini'): HTMLCanvasElement {
   const spec = formats[format], size = photoSize(format), imageX = (spec.width - spec.imageWidth) / 2;
   const c = document.createElement('canvas'); c.width = Math.round(size.width * pxPerMm); c.height = Math.round(size.height * pxPerMm);
   const ctx = c.getContext('2d', { colorSpace: 'srgb' })!; ctx.fillStyle = p.frame; ctx.fillRect(0, 0, c.width, c.height);
   const image = photographicImage(p, pxPerMm, format);
-  ctx.drawImage(image, imageX * pxPerMm, 4 * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
+  if (format === 'peel') drawPeelEdges(ctx, image, p, pxPerMm, imageX, 4, spec.imageWidth, spec.imageHeight);
+  else ctx.drawImage(image, imageX * pxPerMm, 4 * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
   if (pxPerMm >= PRINT_PX_PER_MM) { image.width = 1; image.height = 1; }
   if (p.stamp) drawStamp(ctx, p.stamp, imageX + spec.imageWidth - 2.2, 4 + spec.imageHeight - 2.2, pxPerMm, format === 'strip' ? 2 : 2.4);
   if (format === 'strip') return c;
   const ink = inkFor(p.frame);
+  if (format === 'peel') {
+    // A pen note on the narrow lower margin, the way pulled prints were labelled.
+    ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const text = [p.caption.replace(/[♡☆✧❀☾☼∞⋈]/gu, '').trim(), p.note].filter(Boolean).join(' · ');
+    let size = 3.4 * pxPerMm; ctx.font = `${size}px "${p.font}"`;
+    while (ctx.measureText(text).width > spec.imageWidth * pxPerMm && size > pxPerMm * 1.4) { size -= .5; ctx.font = `${size}px "${p.font}"`; }
+    ctx.fillText(text, spec.width / 2 * pxPerMm, (4 + spec.imageHeight + 4.4) * pxPerMm, spec.imageWidth * pxPerMm); return c;
+  }
   if (p.style && p.style !== 'classic') { drawStyledCaption(ctx, p, pxPerMm, imageX, spec.imageWidth, 4 + spec.imageHeight, ink); return c; }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ink;
   const fitText = (text: string, y: number, size: number, font: string) => { let s = size * pxPerMm; ctx.font = `${s}px "${font}"`; while (ctx.measureText(text).width > spec.imageWidth * pxPerMm && s > pxPerMm * 1.2) { s -= .5; ctx.font = `${s}px "${font}"`; } ctx.fillText(text, spec.width / 2 * pxPerMm, y * pxPerMm, spec.imageWidth * pxPerMm); };

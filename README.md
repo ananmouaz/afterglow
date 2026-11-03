@@ -6,7 +6,7 @@ Turn photos into instant-style prints, with handwritten captions and small pen d
 
 ## Features
 
-- Mini, Square, and Wide frames at their actual physical dimensions, plus a four-photo booth Strip (two fit on one 10 × 15 cm print).
+- Mini, Square, and Wide frames at their actual physical dimensions, plus a four-photo booth Strip (two fit on one 10 × 15 cm print) and a Peel-apart print whose ragged chemical edge is unique to each photo.
 - Edit up to 12 photos through Crop → Look → Caption, then prepare print sheets.
 - Original, Instant Natural, Instant Rich, and five creative looks with adjustable intensity. Optional exposure, softening, flash-style light, grain, and light leak.
 - Four caption fonts, four frame colors, and eight hand-drawn symbols.
