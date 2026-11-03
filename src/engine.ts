@@ -211,7 +211,26 @@ export function guideLines(lines: CutLine[], slots: Slot[], paper: Paper): CutLi
     const h = l.axis === 'h', blockers = slots.filter(s => h ? s.y < l.at - 1e-5 && s.y + s.h > l.at + 1e-5 : s.x < l.at - 1e-5 && s.x + s.w > l.at + 1e-5);
     const lo = blockers.map(s => h ? s.x + s.w : s.y + s.h).filter(v => v <= l.start + 1e-5), hi = blockers.map(s => h ? s.x : s.y).filter(v => v >= l.end - 1e-5);
     return { ...l, start: Math.max(0, ...lo), end: Math.min(h ? paper.width : paper.height, ...hi) };
-  });
+  }).sort((a, b) => (b.end - b.start) - (a.end - a.start) || (a.axis === b.axis ? a.at - b.at : a.axis === 'h' ? -1 : 1));
+}
+// Cut order: longest first, so the sheet becomes strips before strips become prints.
+// A numbered badge sits near either end of a cut, only where it clears every print.
+// Cuts without room stay unnumbered; they are the last short cuts between prints.
+const BADGE_R = 1.6;
+export function badgeSpot(l: CutLine, slots: Slot[], paper: Paper) {
+  const r = BADGE_R;
+  for (const along of [l.start + r + .8, l.end - r - .8]) {
+    const x = l.axis === 'h' ? along : l.at, y = l.axis === 'h' ? l.at : along;
+    if (along - r >= l.start && along + r <= l.end && x - r >= 0 && y - r >= 0 && x + r <= paper.width && y + r <= paper.height && !slots.some(s => x + r > s.x && x - r < s.x + s.w && y + r > s.y && y - r < s.y + s.h)) return { x, y };
+  }
+  return null;
+}
+function drawCutNumber(ctx: CanvasRenderingContext2D, { x, y }: { x: number; y: number }, n: number, pxPerMm: number) {
+  const r = BADGE_R;
+  ctx.save(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d4d4d4'; ctx.lineWidth = Math.max(.12 * pxPerMm, 1);
+  ctx.beginPath(); ctx.arc(x * pxPerMm, y * pxPerMm, r * pxPerMm, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#999'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 ${1.9 * pxPerMm}px "DM Sans"`;
+  ctx.fillText(String(n), x * pxPerMm, (y + .1) * pxPerMm); ctx.restore();
 }
 // Search uniform grids and two-strip, guillotine-friendly arrangements. No
 // shrinking or global-optimal packing claim: every candidate uses real millimeters.
@@ -281,10 +300,12 @@ export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean
   }
   if (guides) {
     ctx.save(); ctx.strokeStyle = '#d4d4d4'; ctx.lineWidth = Math.max(.08 * pxPerMm, 1); ctx.setLineDash([pxPerMm, .8 * pxPerMm]);
-    ctx.beginPath(); guideLines(lines, slots, paper).forEach(l => {
+    const ordered = guideLines(lines, slots, paper);
+    ctx.beginPath(); ordered.forEach(l => {
       ctx.moveTo((l.axis === 'h' ? l.start : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.start) * pxPerMm);
       ctx.lineTo((l.axis === 'h' ? l.end : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.end) * pxPerMm);
     }); ctx.stroke(); ctx.restore();
+    ordered.map(l => badgeSpot(l, slots, paper)).filter(spot => spot !== null).forEach((spot, i) => drawCutNumber(ctx, spot, i + 1, pxPerMm));
   }
   return c;
 }
