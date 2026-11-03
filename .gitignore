@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vercel/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+# Local design/verification records contain workspace-specific paths.
+QA.md
+LESSON-AUDIT.md
+DESIGN.md
