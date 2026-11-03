@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import ts from 'typescript';
 const source = await readFile(new URL('../src/engine.ts', import.meta.url), 'utf8');
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { sheetLayout, paginate, formats } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const { sheetLayout, guideLines, paginate, formats } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 const eps = 1e-5;
 const expected = { mini: [[2, 2], [2, 2], [3, 3], [4, 4], [4, 5], [10, 11]], square: [[1, 1], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], wide: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]] };
 const papers = [{ width: 90, height: 130 }, { width: 100, height: 150 }, { width: 110, height: 170 }, { width: 130, height: 180 }, { width: 150, height: 200 }, { width: 200, height: 300 }];
@@ -60,6 +60,18 @@ test('custom portrait/landscape papers retain bounds at fractional millimeters',
     const plan = sheetLayout(paper, format, mode);
     verify(plan, paper, format, plan.capacity);
   }
+});
+test('guide lines reach the paper edge or the nearest print, never crossing one', () => {
+  for (const format of Object.keys(formats)) for (const paper of papers) for (const mode of ['easy', 'dense']) {
+    let plan; try { plan = sheetLayout(paper, format, mode); } catch { continue; }
+    const guides = guideLines(plan.lines, plan.slots, paper);
+    for (const line of guides) for (const s of plan.slots) assert.ok(line.axis === 'h'
+      ? !(line.at > s.y + eps && line.at < s.y + s.h - eps && Math.min(line.end, s.x + s.w) - Math.max(line.start, s.x) > eps)
+      : !(line.at > s.x + eps && line.at < s.x + s.w - eps && Math.min(line.end, s.y + s.h) - Math.max(line.start, s.y) > eps), 'guide may not cross a print');
+    guides.forEach((g, i) => { assert.ok(g.start <= plan.lines[i].start && g.end >= plan.lines[i].end); assert.ok(g.start >= 0 && g.end <= (g.axis === 'h' ? paper.width : paper.height)); });
+  }
+  const easy = guideLines(sheetLayout(papers[4], 'mini', 'easy', false, 4).lines, sheetLayout(papers[4], 'mini', 'easy', false, 4).slots, papers[4]);
+  for (const g of easy) assert.deepEqual([g.start, g.end], [0, g.axis === 'h' ? 150 : 200]);
 });
 test('invalid papers fail explicitly', () => {
   for (const paper of [{ width: 0, height: 200 }, { width: NaN, height: 200 }, { width: 500, height: 200 }, { width: 50, height: 50 }]) assert.throws(() => sheetLayout(paper));

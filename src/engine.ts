@@ -204,6 +204,15 @@ export function cutLines(slots: Slot[]): CutLine[] {
   });
   return lines;
 }
+// Run each cut on to the paper edge, or to the nearest print in its way, so a
+// ruler or trimmer can line up the whole cut instead of a short segment.
+export function guideLines(lines: CutLine[], slots: Slot[], paper: Paper): CutLine[] {
+  return lines.map(l => {
+    const h = l.axis === 'h', blockers = slots.filter(s => h ? s.y < l.at - 1e-5 && s.y + s.h > l.at + 1e-5 : s.x < l.at - 1e-5 && s.x + s.w > l.at + 1e-5);
+    const lo = blockers.map(s => h ? s.x + s.w : s.y + s.h).filter(v => v <= l.start + 1e-5), hi = blockers.map(s => h ? s.x : s.y).filter(v => v >= l.end - 1e-5);
+    return { ...l, start: Math.max(0, ...lo), end: Math.min(h ? paper.width : paper.height, ...hi) };
+  });
+}
 // Search uniform grids and two-strip, guillotine-friendly arrangements. No
 // shrinking or global-optimal packing claim: every candidate uses real millimeters.
 export function sheetLayout(paper: Paper, format: PrintFormat = 'mini', mode: LayoutMode = 'easy', labeled = false, count?: number) {
@@ -271,8 +280,8 @@ export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean
     }
   }
   if (guides) {
-    ctx.save(); ctx.strokeStyle = '#888'; ctx.lineWidth = .18 * pxPerMm; ctx.setLineDash([1.5 * pxPerMm, pxPerMm]);
-    ctx.beginPath(); lines.forEach(l => {
+    ctx.save(); ctx.strokeStyle = '#d4d4d4'; ctx.lineWidth = Math.max(.08 * pxPerMm, 1); ctx.setLineDash([pxPerMm, .8 * pxPerMm]);
+    ctx.beginPath(); guideLines(lines, slots, paper).forEach(l => {
       ctx.moveTo((l.axis === 'h' ? l.start : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.start) * pxPerMm);
       ctx.lineTo((l.axis === 'h' ? l.end : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.end) * pxPerMm);
     }); ctx.stroke(); ctx.restore();
