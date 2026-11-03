@@ -29,6 +29,8 @@ npm ci
 npm run dev
 ```
 
+To check print sheets without uploading photos, open the dev server with `?demo=4` (1–12). It fills the tray with sample prints and opens the print page. Only the dev server reads this.
+
 ```sh
 npm test
 npm run build
