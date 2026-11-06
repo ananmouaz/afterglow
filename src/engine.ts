@@ -4,6 +4,10 @@ export const PRINT_PX_PER_MM = PRINT_DPI / 25.4;
 export const MAX_PHOTOS = 12;
 export const formats = {
   mini: { name: 'Mini', width: 54, height: 86, imageWidth: 46, imageHeight: 62 },
+  // About half a Mini: nine fit on one 10 × 15 cm print, with a short caption.
+  tiny: { name: 'Tiny', width: 30, height: 46, imageWidth: 26, imageHeight: 34, imageTop: 2 },
+  // The same photo with no caption band, only a small chin.
+  tinyplain: { name: 'Tiny plain', width: 30, height: 39, imageWidth: 26, imageHeight: 34, imageTop: 2 },
   square: { name: 'Square', width: 72, height: 86, imageWidth: 62, imageHeight: 62 },
   wide: { name: 'Wide', width: 108, height: 86, imageWidth: 99, imageHeight: 62 },
   // Peel-apart instant: the image keeps the ragged, chemical-streaked edge of a pulled print.
@@ -14,7 +18,12 @@ export const formats = {
   matchbook: { name: 'Matchbook', width: 92, height: 125, imageWidth: 40, imageHeight: 38, photos: 2 },
 } as const;
 // Formats with a caption band that can take the ticket, boarding-pass and player styles.
-export const supportsStyles = (format: PrintFormat) => format !== 'strip' && format !== 'peel' && format !== 'matchbook';
+export const supportsStyles = (format: PrintFormat) => !['strip', 'peel', 'matchbook', 'tiny', 'tinyplain'].includes(format);
+// Formats whose classic caption can hold hand-drawn doodles.
+export const supportsDoodles = (format: PrintFormat) => supportsStyles(format) || format === 'tiny';
+export const hasCaption = (format: PrintFormat) => format !== 'tinyplain';
+// Distance from the top of a print (or strip cell) to its photo.
+export const imageTop = (format: PrintFormat) => 'imageTop' in formats[format] ? (formats[format] as { imageTop: number }).imageTop : 4;
 export const photosPerPrint = (format: PrintFormat) => 'photos' in formats[format] ? (formats[format] as { photos: number }).photos : 1;
 // What one photo looks like on its own: a whole print, or one strip cell.
 export const photoSize = (format: PrintFormat) => format === 'strip' ? { width: 48, height: 38 } : format === 'matchbook' ? { width: 44, height: 52 } : formats[format];
@@ -52,13 +61,14 @@ export const doodles = [
 export function captionRuns(text: string) {
   return text.split(/([♡☆✧❀☾☼∞⋈](?![\uFE0E\uFE0F\u200D]))/u).filter(Boolean).map(text => ({ text, doodle: doodles.find(d => d.symbol === text) }));
 }
-function drawCaption(ctx: CanvasRenderingContext2D, p: Photo, pxPerMm: number, width: number) {
+function captionSize(font: string) { return font === 'Caveat' ? 5 : font === 'Permanent Marker' ? 3.7 : 3.3; }
+function drawCaption(ctx: CanvasRenderingContext2D, p: Photo, pxPerMm: number, width: number, y = 74.7, scale = 1) {
   const runs = captionRuns(p.caption), maxWidth = width * pxPerMm;
-  let size = (p.font === 'Caveat' ? 5 : p.font === 'Permanent Marker' ? 3.7 : 3.3) * pxPerMm;
+  let size = captionSize(p.font) * scale * pxPerMm;
   const measure = () => { ctx.font = `${size}px "${p.font}"`; return runs.reduce((sum, r) => sum + (r.doodle ? size * 1.04 : ctx.measureText(r.text).width), 0); };
   let total = measure();
   while (total > maxWidth && size > pxPerMm * 1.2) { size = Math.max(pxPerMm * 1.2, size - .5); total = measure(); }
-  ctx.save(); ctx.translate(ctx.canvas.width / 2, 74.7 * pxPerMm); ctx.scale(total > maxWidth ? maxWidth / total : 1, 1);
+  ctx.save(); ctx.translate(ctx.canvas.width / 2, y * pxPerMm); ctx.scale(total > maxWidth ? maxWidth / total : 1, 1);
   ctx.textAlign = 'left'; let x = -total / 2;
   for (const run of runs) {
     if (run.doodle) {
@@ -305,15 +315,16 @@ function drawPeelEdges(ctx: CanvasRenderingContext2D, image: HTMLCanvasElement, 
 }
 function inkFor(frame: string) { return frame === '#302b38' ? '#fffdf7' : '#302b38'; }
 export function renderPhoto(p: Photo, pxPerMm = 10, format: PrintFormat = 'mini'): HTMLCanvasElement {
-  const spec = formats[format], size = photoSize(format), imageX = (size.width - spec.imageWidth) / 2;
+  const spec = formats[format], size = photoSize(format), imageX = (size.width - spec.imageWidth) / 2, top = imageTop(format);
   const c = document.createElement('canvas'); c.width = Math.round(size.width * pxPerMm); c.height = Math.round(size.height * pxPerMm);
   const ctx = c.getContext('2d', { colorSpace: 'srgb' })!; ctx.fillStyle = p.frame; ctx.fillRect(0, 0, c.width, c.height);
   const image = photographicImage(p, pxPerMm, format);
-  if (format === 'peel') drawPeelEdges(ctx, image, p, pxPerMm, imageX, 4, spec.imageWidth, spec.imageHeight);
-  else ctx.drawImage(image, imageX * pxPerMm, 4 * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
+  if (format === 'peel') drawPeelEdges(ctx, image, p, pxPerMm, imageX, top, spec.imageWidth, spec.imageHeight);
+  else ctx.drawImage(image, imageX * pxPerMm, top * pxPerMm, spec.imageWidth * pxPerMm, spec.imageHeight * pxPerMm);
   if (pxPerMm >= PRINT_PX_PER_MM) { image.width = 1; image.height = 1; }
-  if (p.stamp) drawStamp(ctx, p.stamp, imageX + spec.imageWidth - 2.2, 4 + spec.imageHeight - 2.2, pxPerMm, format === 'strip' ? 2 : 2.4);
-  if (format === 'strip' || format === 'matchbook') return c;
+  const small = format === 'tiny' || format === 'tinyplain';
+  if (p.stamp) drawStamp(ctx, p.stamp, imageX + spec.imageWidth - (small ? 1.4 : 2.2), top + spec.imageHeight - (small ? 1.4 : 2.2), pxPerMm, format === 'strip' ? 2 : small ? 1.5 : 2.4);
+  if (format === 'strip' || format === 'matchbook' || !hasCaption(format)) return c;
   const ink = inkFor(p.frame);
   if (format === 'peel') {
     // A pen note on the narrow lower margin, the way pulled prints were labelled.
@@ -326,9 +337,11 @@ export function renderPhoto(p: Photo, pxPerMm = 10, format: PrintFormat = 'mini'
   if (p.style && p.style !== 'classic') { drawStyledCaption(ctx, p, pxPerMm, imageX, spec.imageWidth, 4 + spec.imageHeight, ink); return c; }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ink;
   const fitText = (text: string, y: number, size: number, font: string) => { let s = size * pxPerMm; ctx.font = `${s}px "${font}"`; while (ctx.measureText(text).width > spec.imageWidth * pxPerMm && s > pxPerMm * 1.2) { s -= .5; ctx.font = `${s}px "${font}"`; } ctx.fillText(text, spec.width / 2 * pxPerMm, y * pxPerMm, spec.imageWidth * pxPerMm); };
-  if (captionRuns(p.caption).some(r => r.doodle)) drawCaption(ctx, p, pxPerMm, spec.imageWidth);
-  else fitText(p.caption, 74.7, p.font === 'Caveat' ? 5 : p.font === 'Permanent Marker' ? 3.7 : 3.3, p.font);
-  ctx.globalAlpha = .62; fitText(p.note, 81.2, 2.25, 'DM Sans'); return c;
+  // Caption and note sit at the same places in the band; a Tiny band is a scaled-down Mini's.
+  const band = small ? { caption: 40.2, note: 43.9, scale: .62, noteSize: 1.6 } : { caption: 74.7, note: 81.2, scale: 1, noteSize: 2.25 };
+  if (captionRuns(p.caption).some(r => r.doodle)) drawCaption(ctx, p, pxPerMm, spec.imageWidth, band.caption, band.scale);
+  else fitText(p.caption, band.caption, captionSize(p.font) * band.scale, p.font);
+  ctx.globalAlpha = .62; fitText(p.note, band.note, band.noteSize, 'DM Sans'); return c;
 }
 // A whole booth strip: up to four cells, then the first photo's caption at the foot.
 export function renderStrip(photos: Photo[], pxPerMm = 10): HTMLCanvasElement {
@@ -382,22 +395,40 @@ export function guideLines(lines: CutLine[], slots: Slot[], paper: Paper): CutLi
   }).sort((a, b) => (b.end - b.start) - (a.end - a.start) || (a.axis === b.axis ? a.at - b.at : a.axis === 'h' ? -1 : 1));
 }
 // Cut order: longest first, so the sheet becomes strips before strips become prints.
-// A numbered badge sits near either end of a cut, only where it clears every print.
+// A numbered badge sits on its cut, only where it clears every print. Photo labs
+// and kiosks trim a few millimetres off each edge, so the badge moves inward until
+// it is BADGE_SAFE from the paper edge, or as far in as the free paper allows.
+// Among equally safe spots it stays nearest an end of the cut, and never on top of
+// an earlier number. In thin margins every badge on the sheet shrinks, when that
+// lets them sit further from the edge; one size per sheet keeps the numbers even.
 // Cuts without room stay unnumbered; they are the last short cuts between prints.
-const BADGE_R = 1.6;
-export function badgeSpot(l: CutLine, slots: Slot[], paper: Paper) {
-  const r = BADGE_R;
-  for (const along of [l.start + r + .8, l.end - r - .8]) {
-    const x = l.axis === 'h' ? along : l.at, y = l.axis === 'h' ? l.at : along;
-    if (along - r >= l.start && along + r <= l.end && x - r >= 0 && y - r >= 0 && x + r <= paper.width && y + r <= paper.height && !slots.some(s => x + r > s.x && x - r < s.x + s.w && y + r > s.y && y - r < s.y + s.h)) return { x, y };
-  }
-  return null;
+const BADGE_R = 1.6, BADGE_SMALL_R = 1.1, BADGE_SAFE = 4, BADGE_CLEAR = .4;
+export type BadgeSpot = { x: number; y: number; r: number; edge: number };
+// One spot per guide, in cut order (null where a cut has no room).
+export function badgeSpots(guides: CutLine[], slots: Slot[], paper: Paper) {
+  const place = (r: number) => { const taken: BadgeSpot[] = []; return guides.map(l => { const spot = badgeSpot(l, slots, paper, r, taken); if (spot) taken.push(spot); return spot; }); };
+  const full = place(BADGE_R), worst = (spots: (BadgeSpot | null)[]) => Math.min(BADGE_SAFE, ...spots.map(s => s?.edge ?? BADGE_SAFE));
+  if (worst(full) >= BADGE_SAFE) return full;
+  const small = place(BADGE_SMALL_R);
+  return worst(small) > worst(full) + .3 && small.filter(Boolean).length >= full.filter(Boolean).length ? small : full;
 }
-function drawCutNumber(ctx: CanvasRenderingContext2D, { x, y }: { x: number; y: number }, n: number, pxPerMm: number) {
-  const r = BADGE_R;
+export function badgeSpot(l: CutLine, slots: Slot[], paper: Paper, r = BADGE_R, taken: BadgeSpot[] = []): BadgeSpot | null {
+  const step = .1;
+  let best: (BadgeSpot & { near: number }) | null = null;
+  for (let along = l.start + r; along <= l.end - r + 1e-7; along += step) {
+    const x = l.axis === 'h' ? along : l.at, y = l.axis === 'h' ? l.at : along;
+    const edge = Math.min(x - r, y - r, paper.width - x - r, paper.height - y - r);
+    if (edge < 0 || slots.some(s => x + r + BADGE_CLEAR > s.x && x - r - BADGE_CLEAR < s.x + s.w && y + r + BADGE_CLEAR > s.y && y - r - BADGE_CLEAR < s.y + s.h)) continue;
+    if (taken.some(t => Math.hypot(t.x - x, t.y - y) < t.r + r + BADGE_CLEAR)) continue;
+    const safe = Math.min(BADGE_SAFE, Math.round(edge * 10) / 10), near = Math.min(along - l.start, l.end - along);
+    if (!best || safe > best.edge || (safe === best.edge && near < best.near - 1e-7)) best = { x, y, r, edge: safe, near };
+  }
+  return best && { x: best.x, y: best.y, r: best.r, edge: best.edge };
+}
+function drawCutNumber(ctx: CanvasRenderingContext2D, { x, y, r }: { x: number; y: number; r: number }, n: number, pxPerMm: number) {
   ctx.save(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d4d4d4'; ctx.lineWidth = Math.max(.12 * pxPerMm, 1);
   ctx.beginPath(); ctx.arc(x * pxPerMm, y * pxPerMm, r * pxPerMm, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#999'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 ${1.9 * pxPerMm}px "DM Sans"`;
+  ctx.fillStyle = '#999'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 ${1.9 * r / BADGE_R * pxPerMm}px "DM Sans"`;
   ctx.fillText(String(n), x * pxPerMm, (y + .1) * pxPerMm); ctx.restore();
 }
 // Search uniform grids and two-strip, guillotine-friendly arrangements. No
@@ -532,7 +563,7 @@ export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean
       ctx.moveTo((l.axis === 'h' ? l.start : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.start) * pxPerMm);
       ctx.lineTo((l.axis === 'h' ? l.end : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.end) * pxPerMm);
     }); ctx.stroke(); ctx.restore();
-    ordered.map(l => badgeSpot(l, slots, paper)).filter(spot => spot !== null).forEach((spot, i) => drawCutNumber(ctx, spot, i + 1, pxPerMm));
+    badgeSpots(ordered, slots, paper).filter(spot => spot !== null).forEach((spot, i) => drawCutNumber(ctx, spot, i + 1, pxPerMm));
   }
   return c;
 }
