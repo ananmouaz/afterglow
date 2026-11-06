@@ -8,7 +8,7 @@ import '@fontsource/dm-sans/700.css';
 import '@fontsource/caveat/400.css';
 import '@fontsource/special-elite/400.css';
 import '@fontsource/permanent-marker/400.css';
-import { films, fontOptions, frames, doodles, readPhoto, loadImage, newPhoto, renderPhoto, renderSheet, sheetLayout, download, jpegPrint, canvasBlob, formats, formatChoices, paperChoices, paginate, photoSize, photosPerPrint, supportsStyles, supportsDoodles, hasCaption, imageTop, printStyles, todayStamp, loadFonts, STAMP_CHARS, MAX_PHOTOS, type PrintFormat, type PrintStyle, type LayoutMode, type Photo, type Paper } from './engine';
+import { films, fontOptions, frames, doodles, readPhoto, loadImage, newPhoto, renderPhoto, renderStrip, renderMatchbook, renderSheet, sheetLayout, download, jpegPrint, canvasBlob, formats, formatChoices, paperChoices, paginate, photoSize, photosPerPrint, supportsStyles, supportsDoodles, hasCaption, imageTop, printStyles, todayStamp, loadFonts, STAMP_CHARS, MAX_PHOTOS, type PrintFormat, type PrintStyle, type LayoutMode, type Photo, type Paper } from './engine';
 import './style.css';
 
 const Print = memo(function Print({ photo, format, pxPerMm: requestedScale, className = '' }: { photo: Photo; format: PrintFormat; pxPerMm?: number; className?: string }) {
@@ -29,8 +29,13 @@ const Print = memo(function Print({ photo, format, pxPerMm: requestedScale, clas
 });
 // Dev only: `?demo=4` opens the print page with 4 sample prints, for checking sheets.
 const demoCount = import.meta.env.DEV ? Math.min(MAX_PHOTOS, Math.max(0, Math.floor(Number(new URLSearchParams(location.search).get('demo'))) || 0)) : 0;
+// A bank card is the size most people can picture without a ruler.
+const CARD = { width: 85.6, height: 54 };
+// One scale for every size, so switching sizes shows how big each really is.
+const WELCOME_SCALE = { width: 116, height: 150 };
 function WelcomePrint({ format }: { format: PrintFormat }) {
   const [sample, setSample] = useState<Photo | null>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
     const sampleSrc = `${import.meta.env.BASE_URL}demo-beach.jpg`;
@@ -39,7 +44,26 @@ function WelcomePrint({ format }: { format: PrintFormat }) {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
-  return <div className="welcome-art" aria-hidden="true">{sample && <Print photo={sample} format={format} pxPerMm={6}/>}</div>;
+  useEffect(() => {
+    if (!sample) return;
+    let cancelled = false;
+    loadFonts([sample]).then(() => {
+      if (cancelled || !canvas.current) return;
+      // Strips and matchbooks show the whole print, not one photo from it.
+      const image = format === 'strip' ? renderStrip(Array(4).fill(sample), 6) : format === 'matchbook' ? renderMatchbook(Array(2).fill(sample), 6) : renderPhoto(sample, 6, format);
+      canvas.current.width = image.width; canvas.current.height = image.height;
+      canvas.current.getContext('2d')!.drawImage(image, 0, 0); image.width = 1; image.height = 1;
+    });
+    return () => { cancelled = true; };
+  }, [sample, format]);
+  const spec = formats[format], mm = (v: number) => `calc(var(--mm) * ${v})`;
+  return <div className="welcome-art" aria-hidden="true" style={{ '--scale-w': WELCOME_SCALE.width, '--scale-h': WELCOME_SCALE.height } as React.CSSProperties}>
+    <div className="scale-stage">
+      <span className="scale-card" style={{ width: mm(CARD.width), height: mm(CARD.height) }}><small>Bank card</small></span>
+      {sample && <canvas ref={canvas} style={{ width: mm(spec.width), height: mm(spec.height) }}/>}
+    </div>
+    <p className="scale-note">Shown to scale beside a bank card · {spec.width} × {spec.height} mm</p>
+  </div>;
 }
 const FilmThumb = memo(function FilmThumb({ photo, film, format }: { photo: Photo; film: typeof films[number]; format: PrintFormat }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -61,7 +85,7 @@ function Range({ label, value, onChange, min = 0, max = 100, step = 1, unit = '%
   return <label className="range-control" style={{ '--range-fill': `${(value - min) / (max - min) * 100}%` } as React.CSSProperties}><span>{label}<output>{value.toFixed(step < 1 ? 2 : 0)}{unit}</output></span><input aria-label={label} aria-valuetext={`${value.toFixed(step < 1 ? 2 : 0)}${unit === '×' ? ' times' : unit}`} type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(+e.target.value)}/></label>;
 }
 function FormatPicker({ value, onChange, visual = false }: { value: PrintFormat; onChange: (format: PrintFormat) => void; visual?: boolean }) {
-  if (visual) return <fieldset className="format-choices"><legend>Print size</legend><div>{formatChoices.map(f => <button key={f} type="button" aria-pressed={value === f} onClick={() => onChange(f)}><span className="format-silhouette" style={{ aspectRatio: `${formats[f].width}/${formats[f].height}` }}><i style={{ aspectRatio: `${formats[f].imageWidth}/${formats[f].imageHeight}` }}/></span><strong>{formats[f].name}</strong><small>{photosPerPrint(f) > 1 ? `${photosPerPrint(f)} photos · ` : ''}{formats[f].width} × {formats[f].height} mm</small>{value === f && <Check className="format-check" size={13}/>}</button>)}</div></fieldset>;
+  if (visual) return <fieldset className="format-choices"><legend>Print size</legend><div>{formatChoices.map(f => <button key={f} type="button" aria-pressed={value === f} onClick={() => onChange(f)}><span className="format-silhouette" style={{ width: `calc(var(--thumb-mm) * ${formats[f].width})`, height: `calc(var(--thumb-mm) * ${formats[f].height})` }}/><strong>{formats[f].name}</strong><small>{photosPerPrint(f) > 1 ? `${photosPerPrint(f)} photos · ` : ''}{formats[f].width} × {formats[f].height} mm</small>{value === f && <Check className="format-check" size={13}/>}</button>)}</div></fieldset>;
   return <div className="format-picker"><label className="field-label" htmlFor="print-format">Finished print size</label><select id="print-format" value={value} onChange={e => onChange(e.target.value as PrintFormat)}>{formatChoices.map(f => <option key={f} value={f}>{formats[f].name} · {formats[f].width} × {formats[f].height} mm</option>)}</select></div>;
 }
 function capacityFor(paper: Paper, format: PrintFormat, mode: LayoutMode, labeled = false) {
