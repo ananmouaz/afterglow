@@ -425,10 +425,13 @@ export function badgeSpot(l: CutLine, slots: Slot[], paper: Paper, r = BADGE_R, 
   }
   return best && { x: best.x, y: best.y, r: best.r, edge: best.edge };
 }
+// Cut guides must be easy to see on a white border under a lamp: a mid grey,
+// 0.15 mm thick, in long dashes. Still light enough not to read as part of a print.
+const CUT_INK = '#707070', CUT_WIDTH = .15, cutDash = (pxPerMm: number) => [1.6 * pxPerMm, .7 * pxPerMm];
 function drawCutNumber(ctx: CanvasRenderingContext2D, { x, y, r }: { x: number; y: number; r: number }, n: number, pxPerMm: number) {
-  ctx.save(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#d4d4d4'; ctx.lineWidth = Math.max(.12 * pxPerMm, 1);
+  ctx.save(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.strokeStyle = CUT_INK; ctx.lineWidth = Math.max(CUT_WIDTH * pxPerMm, 1.5);
   ctx.beginPath(); ctx.arc(x * pxPerMm, y * pxPerMm, r * pxPerMm, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#999'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `600 ${1.9 * r / BADGE_R * pxPerMm}px "DM Sans"`;
+  ctx.fillStyle = '#3c3c3c'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `700 ${1.9 * r / BADGE_R * pxPerMm}px "DM Sans"`;
   ctx.fillText(String(n), x * pxPerMm, (y + .1) * pxPerMm); ctx.restore();
 }
 // Search uniform grids and two-strip, guillotine-friendly arrangements. No
@@ -523,9 +526,9 @@ export function renderMatchbook(photos: Photo[], pxPerMm = 10): HTMLCanvasElemen
     ctx.restore(); text('CLOSE COVER BEFORE STRIKING', cover / 2, flapTop + 2.7, 1.25, 'DM Sans', cover - 8, '700', .3);
   });
   // Score lines across the spines, then the cards that sit inside like matches.
-  ctx.save(); ctx.strokeStyle = '#bdbdbd'; ctx.lineWidth = Math.max(mm(.08), 1); ctx.setLineDash([mm(2), mm(.7), mm(.3), mm(.7)]);
+  ctx.save(); ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = Math.max(mm(.1), 1); ctx.setLineDash([mm(2), mm(.7), mm(.3), mm(.7)]);
   for (const y of [front, backTop, backTop + back, flapTop]) { ctx.beginPath(); ctx.moveTo(0, mm(y)); ctx.lineTo(mm(cover), mm(y)); ctx.stroke(); }
-  ctx.setLineDash([mm(1), mm(.8)]); ctx.strokeStyle = '#d4d4d4';
+  ctx.setLineDash(cutDash(pxPerMm)); ctx.strokeStyle = CUT_INK; ctx.lineWidth = Math.max(mm(CUT_WIDTH), 1.5);
   ctx.beginPath(); ctx.moveTo(mm(cover), 0); ctx.lineTo(mm(cover), mm(spec.height));
   const card = photoSize('matchbook');
   for (let i = 1; i <= 2; i++) { ctx.moveTo(mm(cover), mm(card.height * i)); ctx.lineTo(mm(spec.width), mm(card.height * i)); }
@@ -557,7 +560,7 @@ export async function renderSheet(photos: Photo[], paper: Paper, guides: boolean
     }
   }
   if (guides) {
-    ctx.save(); ctx.strokeStyle = '#d4d4d4'; ctx.lineWidth = Math.max(.08 * pxPerMm, 1); ctx.setLineDash([pxPerMm, .8 * pxPerMm]);
+    ctx.save(); ctx.strokeStyle = CUT_INK; ctx.lineWidth = Math.max(CUT_WIDTH * pxPerMm, 1.5); ctx.setLineDash(cutDash(pxPerMm));
     const ordered = guideLines(lines, slots, paper);
     ctx.beginPath(); ordered.forEach(l => {
       ctx.moveTo((l.axis === 'h' ? l.start : l.at) * pxPerMm, (l.axis === 'h' ? l.at : l.start) * pxPerMm);

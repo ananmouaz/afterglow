@@ -179,7 +179,6 @@ html.large-text .font-options,html.large-text .format-choices>div{grid-template-
 html.large-text .tray-page>.undo-notice{position:static}
 @media(max-width:300px){.site-header,.editing .site-header{padding-inline:12px;gap:4px}.wordmark{font-size:min(var(--text-title),24px)}.wordmark>svg{display:none}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
-.welcome-art{position:relative}.welcome-art canvas{position:absolute;inset:0;max-width:100%;max-height:100%}
 @media(max-width:650px){
  .print-page{padding-bottom:112px}
  .print-page:after{content:'';position:fixed;left:0;right:0;bottom:0;height:84px;border-top:1px solid var(--line);background:var(--base);z-index:3;pointer-events:none}
@@ -207,3 +206,16 @@ html.keyboard-open.large-text .editing{overflow:auto}
 html.keyboard-open.large-text .live-preview{display:none}
 .print-styles{margin:0 0 20px}.stamp-row{margin-top:20px}.stamp-input{font-variant-numeric:tabular-nums;letter-spacing:1px;color:#c25a00}
 .print-styles button,.print-styles button:first-child{font-size:var(--text-small);font-family:'DM Sans',sans-serif}
+/* Welcome preview: every size and the bank card share one mm scale. */
+.welcome-art{display:flex;flex-direction:column;gap:10px;place-items:initial}
+.scale-stage{flex:1;min-height:0;width:100%;container-type:size;display:flex;align-items:center;justify-content:center;position:relative}
+.scale-stage{--mm:min(calc(100cqh / var(--scale-h)),calc(100cqw / var(--scale-w)))}
+.scale-stage>canvas,.welcome-art .scale-stage>canvas{position:relative;display:block;max-width:none;max-height:none;object-fit:fill;z-index:1;transition:width .2s ease,height .2s ease}
+.scale-card{position:absolute;left:50%;top:50%;transform:translate(-18%,-4%) rotate(6deg);border:1.5px dashed #9aa39b;border-radius:calc(var(--mm) * 3.2);background:#ebede7;display:flex;align-items:flex-end;justify-content:flex-end;padding:calc(var(--mm) * 2.5)}
+.scale-card small{font-size:var(--text-small);color:var(--muted);line-height:1}
+.scale-note{text-align:center;font-size:var(--text-small);color:var(--muted)}
+/* Size buttons: outlines at one shared scale, so Tiny looks tiny next to Wide. */
+.format-choices{--thumb-mm:.2px}.format-choices button{padding-right:30px}
+.format-silhouette{display:block;position:absolute;right:8px;bottom:9px;background:#fff;border:1px solid var(--control-border);border-radius:1px}
+.format-choices button[aria-pressed=true] .format-silhouette{border-color:var(--accent);background:#dfe6dc}
+@media(max-width:650px){.format-choices{--thumb-mm:.16px}.format-choices button{padding-right:22px}.format-silhouette{right:6px;bottom:7px}.scale-card small{font-size:.625rem}}
