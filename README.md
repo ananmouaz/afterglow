@@ -6,18 +6,20 @@ Turn photos into instant-style prints, with handwritten captions and small pen d
 
 ## Features
 
-- Mini, Square, and Wide frames at their actual physical dimensions, plus a four-photo booth Strip (two fit on one 10 × 15 cm print) a Peel-apart print whose ragged chemical edge is unique to each photo, and a fold-up Matchbook that holds two photo cards.
+- Mini, Square, and Wide frames at their actual physical dimensions, Tiny prints (nine fit on one 10 × 15 cm print, with a short caption or as plain photos with no caption), plus a four-photo booth Strip (two fit on one 10 × 15 cm print) a Peel-apart print whose ragged chemical edge is unique to each photo, and a fold-up Matchbook that holds two photo cards.
 - Edit up to 12 photos through Crop → Look → Caption, then prepare print sheets.
 - Original, Instant Natural, Instant Rich, and five creative looks with adjustable intensity. Optional exposure, softening, flash-style light, grain, and light leak.
 - Four caption fonts, four frame colors, and eight hand-drawn symbols.
 - Print styles: Classic, Now playing (song, artist and player controls), Ticket stub, and Boarding pass. Optional orange seven-segment date stamp.
-- Fewer cuts or Fit more layouts, shared cutting guides, multiple sheets, and optional printing-cost comparison.
+- Fewer cuts or Fit more layouts, shared cutting guides with numbers kept away from the edge photo labs trim, multiple sheets, and optional printing-cost comparison.
 - Current-sheet JPG at 600 DPI, or lossless PDF containing every sheet at its actual paper size.
 - Responsive editor, keyboard-aware layout, large-text support, reduced-motion support, and undo for photo removal.
 
 | Frame | Outer size | Image area |
 |---|---|---|
 | Mini | 54 × 86 mm | 46 × 62 mm |
+| Tiny | 30 × 46 mm | 26 × 34 mm |
+| Tiny plain | 30 × 39 mm | 26 × 34 mm |
 | Square | 72 × 86 mm | 62 × 62 mm |
 | Wide | 108 × 86 mm | 99 × 62 mm |
 

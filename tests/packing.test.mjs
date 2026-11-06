@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import ts from 'typescript';
 const source = await readFile(new URL('../src/engine.ts', import.meta.url), 'utf8');
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { sheetLayout, guideLines, badgeSpot, paginate, formats, todayStamp, STAMP_CHARS } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const { sheetLayout, guideLines, badgeSpots, paginate, formats, todayStamp, STAMP_CHARS } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 const eps = 1e-5;
-const expected = { mini: [[2, 2], [2, 2], [3, 3], [4, 4], [4, 5], [10, 11]], square: [[1, 1], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], wide: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]], strip: [[0, 0], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], peel: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]], matchbook: [[0, 0], [1, 1], [1, 1], [1, 1], [2, 2], [4, 4]] };
+const expected = { mini: [[2, 2], [2, 2], [3, 3], [4, 4], [4, 5], [10, 11]], tiny: [[4, 6], [9, 9], [10, 11], [12, 14], [18, 19], [36, 39]], tinyplain: [[8, 8], [9, 10], [12, 13], [16, 17], [20, 22], [45, 47]], square: [[1, 1], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], wide: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]], strip: [[0, 0], [2, 2], [2, 2], [2, 2], [4, 4], [8, 8]], peel: [[1, 1], [1, 1], [1, 1], [2, 2], [2, 2], [4, 5]], matchbook: [[0, 0], [1, 1], [1, 1], [1, 1], [2, 2], [4, 4]] };
 const papers = [{ width: 90, height: 130 }, { width: 100, height: 150 }, { width: 110, height: 170 }, { width: 130, height: 180 }, { width: 150, height: 200 }, { width: 200, height: 300 }];
 const [p15x20, p20x30] = [papers[4], papers[5]];
 function verify(plan, paper, format, count) {
@@ -78,14 +78,18 @@ test('guide lines reach the paper edge or the nearest print, never crossing one'
 test('cut-number badges stay on paper and off every print', () => {
   for (const format of Object.keys(formats)) for (const paper of papers) for (const mode of ['easy', 'dense']) {
     let plan; try { plan = sheetLayout(paper, format, mode); } catch { continue; }
-    for (const g of guideLines(plan.lines, plan.slots, paper)) {
-      const spot = badgeSpot(g, plan.slots, paper); if (!spot) continue;
-      assert.ok(spot.x >= 1.6 && spot.y >= 1.6 && spot.x <= paper.width - 1.6 && spot.y <= paper.height - 1.6);
-      for (const s of plan.slots) assert.ok(spot.x + 1.6 <= s.x + eps || spot.x - 1.6 >= s.x + s.w - eps || spot.y + 1.6 <= s.y + eps || spot.y - 1.6 >= s.y + s.h - eps);
+    const spots = badgeSpots(guideLines(plan.lines, plan.slots, paper), plan.slots, paper);
+    assert.equal(new Set(spots.filter(Boolean).map(s => s.r)).size <= 1, true, 'one badge size per sheet');
+    for (const [i, a] of spots.entries()) for (const b of spots.slice(i + 1)) if (a && b) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.r + b.r, 'numbers never overlap');
+    for (const spot of spots) {
+      if (!spot) continue;
+      const r = spot.r;
+      assert.ok(spot.x >= r && spot.y >= r && spot.x <= paper.width - r && spot.y <= paper.height - r);
+      for (const s of plan.slots) assert.ok(spot.x + r <= s.x + eps || spot.x - r >= s.x + s.w - eps || spot.y + r <= s.y + eps || spot.y - r >= s.y + s.h - eps);
     }
   }
   const plan = sheetLayout(papers[4], 'mini', 'easy', false, 4);
-  assert.ok(guideLines(plan.lines, plan.slots, papers[4]).every(g => badgeSpot(g, plan.slots, papers[4])), 'a 2×2 grid numbers every cut');
+  assert.ok(badgeSpots(guideLines(plan.lines, plan.slots, papers[4]), plan.slots, papers[4]).every(Boolean), 'a 2×2 grid numbers every cut');
 });
 test('two booth strips share one 10 × 15 cm print', () => {
   const plan = sheetLayout(papers[1], 'strip', 'easy', false, 2);
@@ -118,4 +122,24 @@ test('caption doodles preserve ordinary emoji and text presentation sequences', 
   assert.equal(runs.map(r => r.text).join(''), keyboard + ' ♡☆✧❀☾☼∞⋈');
   assert.equal(runs[0].text, keyboard + ' ');
   assert.equal(doodles.length, 8);
+});
+
+test('cut numbers keep clear of the edge a photo lab trims', () => {
+  const inset = (spot, paper) => Math.min(spot.x - spot.r, spot.y - spot.r, paper.width - spot.x - spot.r, paper.height - spot.y - spot.r);
+  // A 2 × 2 grid has wide margins: every number sits a full 4 mm in.
+  let plan = sheetLayout(p15x20, 'mini', 'easy', false, 4);
+  for (const spot of badgeSpots(guideLines(plan.lines, plan.slots, p15x20), plan.slots, p15x20)) assert.ok(inset(spot, p15x20) >= 4 - eps);
+  // Five Minis leave only a 5 mm margin; numbers still move well past the old 0.8 mm.
+  for (const paper of [p15x20, { width: 200, height: 150 }]) {
+    plan = sheetLayout(paper, 'mini', 'dense', false, 5);
+    for (const spot of badgeSpots(guideLines(plan.lines, plan.slots, paper), plan.slots, paper)) assert.ok(inset(spot, paper) >= 2.2);
+  }
+});
+test('nine Tiny prints fit one 10 × 15 cm print, every cut numbered', () => {
+  for (const format of ['tiny', 'tinyplain']) {
+    const plan = sheetLayout(papers[1], format, 'easy', false, 9);
+    verify(plan, papers[1], format, 9);
+    assert.ok(plan.slots.every(s => s.x >= 5 - eps && s.y >= 5 - eps && s.x + s.w <= 95 + eps && s.y + s.h <= 145 + eps), 'prints keep a 5 mm margin');
+    assert.ok(badgeSpots(guideLines(plan.lines, plan.slots, papers[1]), plan.slots, papers[1]).every(Boolean));
+  }
 });
