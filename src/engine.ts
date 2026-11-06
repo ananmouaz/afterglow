@@ -425,13 +425,13 @@ export function badgeSpot(l: CutLine, slots: Slot[], paper: Paper, r = BADGE_R, 
   }
   return best && { x: best.x, y: best.y, r: best.r, edge: best.edge };
 }
-// Cut guides must be easy to see on a white border under a lamp: a mid grey,
-// 0.15 mm thick, in long dashes. Still light enough not to read as part of a print.
-const CUT_INK = '#707070', CUT_WIDTH = .15, cutDash = (pxPerMm: number) => [1.6 * pxPerMm, .7 * pxPerMm];
+// Cut guides must be easy to see on a white border under a lamp: a medium-light grey,
+// 0.12 mm thick, in long dashes. Light enough not to read as part of a print.
+const CUT_INK = '#a3a3a3', CUT_WIDTH = .12, cutDash = (pxPerMm: number) => [1.6 * pxPerMm, .7 * pxPerMm];
 function drawCutNumber(ctx: CanvasRenderingContext2D, { x, y, r }: { x: number; y: number; r: number }, n: number, pxPerMm: number) {
   ctx.save(); ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.strokeStyle = CUT_INK; ctx.lineWidth = Math.max(CUT_WIDTH * pxPerMm, 1.5);
   ctx.beginPath(); ctx.arc(x * pxPerMm, y * pxPerMm, r * pxPerMm, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#3c3c3c'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `700 ${1.9 * r / BADGE_R * pxPerMm}px "DM Sans"`;
+  ctx.fillStyle = '#666'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `700 ${1.9 * r / BADGE_R * pxPerMm}px "DM Sans"`;
   ctx.fillText(String(n), x * pxPerMm, (y + .1) * pxPerMm); ctx.restore();
 }
 // Search uniform grids and two-strip, guillotine-friendly arrangements. No
